@@ -1,0 +1,28 @@
+
+version: "3.8"
+services:
+  controller:
+    image: networkop/envoy-split-proxy
+    container_name: app
+    command:
+    - -conf
+    - test.yaml
+    volumes: 
+    - type: "bind"
+      source: ./test.yaml
+      target: /test.yaml
+  proxy:
+    image: envoyproxy/envoy:v1.16.2
+    volumes:
+    - type: "bind"
+      source: ./envoy.yaml
+      target: /etc/envoy/envoy.yaml
+    ports:
+    - "80:80"
+    - "8080:8080"
+    - "19000:19000"
+    command:
+    - --config-path
+    - /etc/envoy/envoy.yaml
+    - --log-level 
+    - debug
