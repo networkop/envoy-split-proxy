@@ -1,0 +1,7 @@
+interface: eth0
+urls:
+  - "*.netflix.com"
+  - "*.nflxvideo.net"
+  - "*.nflxso.net"
+  - "*.youtube.com"
+  - "*.amazon.com"
