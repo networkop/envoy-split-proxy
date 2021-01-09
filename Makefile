@@ -8,8 +8,5 @@ envoy-split-proxy: $(SOURCES)
 	CGO_ENABLED=0 go build -o envoy-split-proxy -ldflags "-X main.version=$(VERSION) -extldflags -static" .
 
 
-docker_build: envoy-split-proxy Dockerfile
-	docker build -t $(DOCKER_IMAGE)  .
-
-docker_push:
-	docker push $(DOCKER_IMAGE)
+docker: envoy-split-proxy Dockerfile
+	docker buildx build --push --platform linux/amd64,linux/arm64 -t $(DOCKER_IMAGE)  .

@@ -1,7 +1,13 @@
-interface: eth0
+interface: tun0
 urls:
-  - "*.netflix.com"
-  - "*.nflxvideo.net"
-  - "*.nflxso.net"
-  - "*.youtube.com"
-  - "*.amazon.com"
+- netflix.com
+- nflxvideo.net
+- nflxext.com
+- nflxso.net
+- nflximg.com
+- netflix.net
+- bbc.co.uk
+- bbc.com
+- bbc.net.uk
+- bbcfmt.s.llnwi.net
+- bbci.co.uk

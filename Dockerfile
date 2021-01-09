@@ -1,7 +1,8 @@
 # Build the main binary
-FROM golang:1.15.6-buster as builder
+FROM --platform=${BUILDPLATFORM} golang:1.15.6-buster as builder
 
-WORKDIR /workspace
+WORKDIR /src
+ENV CGO_ENABLED=0
 
 COPY go.mod .
 COPY go.sum .
@@ -10,12 +11,15 @@ RUN go mod download
 
 COPY . .
 
-RUN CGO_ENABLED=0 GOOS=linux GOARCH=amd64 GO111MODULE=on go build -a -o envoy-split-proxy .
+ARG TARGETOS
+ARG TARGETARCH
+
+RUN GOOS=${TARGETOS} GOARCH=${TARGETARCH} go build -a -o envoy-split-proxy .
 
 
 FROM gcr.io/distroless/static:nonroot
 WORKDIR /
-COPY --from=builder /workspace/envoy-split-proxy .
+COPY --from=builder /src/envoy-split-proxy .
 USER nonroot:nonroot
 
 ENTRYPOINT ["/envoy-split-proxy"]
