@@ -29,3 +29,26 @@ docker run --name app -d --net=host -v $(pwd)/test.yaml:/test.yaml networkop/env
 ```
 
 All traffic is now (L7-)transparently proxied by Envoy and all domains specified in `test.yaml` are redirected to the interface specificed.
+
+
+## Discovering domain names
+
+In order to succesfully re-route a certain application's traffic, we need to know all the domain name it uses (or at least the ones that it uses for location discovery). This will most likely _not_ be a standard domain like `netflix.com` or `bbc.co.uk`. One approach is to load the app in your browser and watch the network traffic in a developer console. Another approach I found is using [netify.ai](netify.ai/resources/applications) website. For example if I wanted to find all domains for Amazon Video (Prime), I would do:
+
+```
+$ curl -sL netify.ai/resources/applications/amazon-video | grep ">Domains<" -A12
+    <h3 class="feature-title">Domains</h3>
+    <ul class="default-ul indent-2">
+                    <li>aiv-cdn.net</li>
+                    <li>aiv-cdn.net.c.footprint.net</li>
+                    <li>aiv-delivery.net</li>
+                    <li>amazonvideo.com</li>
+                    <li>atv-ext.amazon.com</li>
+                    <li>atv-ps.amazon.com</li>
+                    <li>d25xi40x97liuc.cloudfront.net</li>
+                    <li>dmqdd6hw24ucf.cloudfront.net</li>
+                    <li>media-amazon.com</li>
+                    <li>primevideo.com</li>
+            </ul>
+```
+I would than add these domains to the list of URLs one by one or, if I'm lazy, just add all of them. It's very unlikely that such indiscriminate approach is going to break anything.
