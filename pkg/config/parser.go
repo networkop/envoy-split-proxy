@@ -59,19 +59,35 @@ func (d *Data) newFromFile() error {
 		return fmt.Errorf("More than 1 URLs must be configured")
 	}
 
-	d.idempotentUpdate(firstIP, cfg.URLs)
+	d.idempotentUpdate(firstIP, dedup(cfg.URLs))
 
 	return nil
 }
 
 func (d *Data) idempotentUpdate(ip net.IP, urls []string) {
+	logrus.Debugf("Idempotently applying IP %s", ip.String())
+	logrus.Debugf("and URLs %+v", urls)
+
 	if !ip.Equal(d.IP) {
+		logrus.Debugf("IP is different from %s", d.IP.String())
 		d.IP = ip
 		d.Changed = true
 	}
 
 	if !reflect.DeepEqual(urls, d.URLs) {
+		logrus.Debugf("URLs are different from %s", d.URLs)
 		d.URLs = urls
 		d.Changed = true
 	}
+}
+
+func dedup(input []string) (result []string) {
+	uniq := make(map[string]bool)
+	for _, i := range input {
+		if _, exists := uniq[i]; !exists {
+			uniq[i] = true
+			result = append(result, i)
+		}
+	}
+	return
 }
