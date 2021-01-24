@@ -52,3 +52,25 @@ $ curl -sL netify.ai/resources/applications/amazon-video | grep ">Domains<" -A12
             </ul>
 ```
 I would than add these domains to the list of URLs one by one or, if I'm lazy, just add all of them. It's very unlikely that such indiscriminate approach is going to break anything.
+
+
+
+## Troubleshooting
+
+To check to current list of bypassed domain names from a host running envoy do:
+
+```
+curl localhost:19000/    | jq '.configs[2].dynamic_listeners[0].active_state.listener.filter_chains[0].filter_chain_match.server_names'
+```
+
+To see the list of DNS lookups going out of a VPN interface do:
+
+```
+sudo tcpdump -i wg-pia udp port 53
+```
+
+To see the list of non-bypassed TCP connections do: 
+
+```
+sudo tcpdump -i wg-pia  "tcp[tcpflags] & tcp-syn != 0"
+```

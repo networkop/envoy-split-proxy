@@ -14,7 +14,8 @@ var (
 	configFlag = flag.String("conf", "", "split-proxy configuration file (YAML)")
 	debugFlag  = flag.Bool("debug", false, "enable debug logging")
 	envoyID    = flag.String("envoy-id", "split", "envoy Node ID")
-	envoyPort  = flag.Int("envoy-port", 10000, "envoy listener port")
+	httpsPort  = flag.Int("https-port", 10000, "envoy https listener port")
+	httpPort   = flag.Int("http-port", 10001, "envoy http listener port")
 	grpcURL    = flag.String("grpc", ":18000", "GRPC URL to listen on for incoming connections from Envoy (default: ':18000')")
 	cleanup    = flag.Bool("cleanup", false, "cleanup any created configuration")
 )
@@ -36,7 +37,7 @@ func Run() error {
 		return err
 	}
 
-	envoy, err := envoy.NewServer(*grpcURL, *envoyID, *envoyPort)
+	envoy, err := envoy.NewServer(*grpcURL, *envoyID, *httpsPort, *httpPort)
 	if err != nil {
 		return err
 	}
