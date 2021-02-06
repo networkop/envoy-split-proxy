@@ -1,6 +1,6 @@
 # envoy-split-proxy
 
-Configure Envoy to act as a TCP proxy and SNI-based router to allow VPN bypass for VPN-sensitive applications like Netflix, BBC iPlayer, Amazon Prime etc. The assumption is that the host OS has multiple default routes and you want to steer _some_ traffic to a non-preferred default interface (the one that has higher metric). The current application will parse a [YAML file](./test.yaml) containing that non-default interface and a list of URLs and will configure Envoy to do SNI-based routing of these domains to that interface:
+Configure Envoy to act as a TCP proxy and SNI-based router to allow VPN bypass for VPN-sensitive applications like Netflix, BBC iPlayer, Amazon Prime etc. The assumption is that the host OS has multiple default routes and you want to steer _some_ traffic to a non-preferred default interface (the one that has higher metric). The current application will parse a [YAML file](./split.yaml) containing that non-default interface and a list of URLs and will configure Envoy to do SNI-based routing of these domains to that interface:
 
 ![](./arch.png)
 
@@ -20,15 +20,15 @@ On the ARM box set up an iptables redirect to send all HTTPS traffic to envoy:
 sudo iptables -t nat -A PREROUTING -p tcp --dport 443 -j REDIRECT --to-port 10000
 ```
 
-Copy `envoy.yaml` and `test.yaml` into your `pwd` and run:
+Copy `envoy.yaml` and `split.yaml` into your `pwd` and run:
 
 ```
 docker run --name envoy -d --net=host -v $(pwd)/envoy.yaml:/etc/envoy/envoy.yaml envoyproxy/envoy:v1.16.2 --config-path /etc/envoy/envoy.yaml
 
-docker run --name app -d --net=host -v $(pwd)/test.yaml:/test.yaml networkop/envoy-split-proxy -conf /test.yaml
+docker run --name app -d --net=host -v $(pwd)/split.yaml:/split.yaml networkop/envoy-split-proxy -conf /split.yaml
 ```
 
-All traffic is now (L7-)transparently proxied by Envoy and all domains specified in `test.yaml` are redirected to the interface specificed.
+All traffic is now (L7-)transparently proxied by Envoy and all domains specified in `split.yaml` are redirected to the interface specificed.
 
 
 ## Discovering domain names
@@ -53,6 +53,38 @@ $ curl -sL netify.ai/resources/applications/amazon-video | grep ">Domains<" -A12
 ```
 I would than add these domains to the list of URLs one by one or, if I'm lazy, just add all of them. It's very unlikely that such indiscriminate approach is going to break anything.
 
+The most reliable approach involves taking a packet capture of a client application traffic. We only need to capture TCP SYNs to see where the traffic is going and additional can narrow down the search by specifying the source address (e.g. 192.168.0.57):  
+
+```
+sudo tcpdump -i any "hostname 192.168.0.57 && tcp[tcpflags] & tcp-syn != 0"
+
+15:28:55.101209 IP 192.168.0.57.38342 > ec2-52-19-112-13.eu-west-1.compute.amazonaws.com.https: Flags [S], seq 1055004181, win 14600, options [mss 1460,sackOK,TS val 4294904284 ecr 0,nop,wscale 6], length 0
+```
+
+With that information we can use openssl, [step](https://github.com/smallstep/cli) or any web browser to extract domain names from the TLS certificate:
+
+```
+step certificate inspect https://ec2-52-19-112-13.eu-west-1.compute.amazonaws.com -insecure --format json | jq '.names'
+[
+  "*.fe.api.amazonvideo.com",
+  "*.ec.api.amazonvideo.com",
+  "atv-ext-eu.amazon.com",
+  "api.amazonvideo.com",
+  "*.api.amazonvideo.com",
+  "*.eu.ec.api.amazonvideo.com",
+  "atv-eu.amazon.com",
+  "*.na.api.amazonvideo.com",
+  "*.eu.api.amazonvideo.com"
+]
+```
+
+The above can be summarised to the following two configuration lines
+
+```
+## Amazon Prime
+- "*.amazonvideo.com"
+- "atv-ext-eu.amazon.com"
+```
 
 
 ## Troubleshooting
@@ -63,14 +95,3 @@ To check to current list of bypassed domain names from a host running envoy do:
 curl localhost:19000/    | jq '.configs[2].dynamic_listeners[0].active_state.listener.filter_chains[0].filter_chain_match.server_names'
 ```
 
-To see the list of DNS lookups going out of a VPN interface do:
-
-```
-sudo tcpdump -i wg-pia udp port 53
-```
-
-To see the list of non-bypassed TCP connections do: 
-
-```
-sudo tcpdump -i wg-pia  "tcp[tcpflags] & tcp-syn != 0"
-```

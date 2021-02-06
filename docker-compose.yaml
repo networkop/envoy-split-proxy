@@ -6,11 +6,11 @@ services:
     container_name: app
     command:
     - -conf
-    - test.yaml
+    - split.yaml
     volumes: 
     - type: "bind"
-      source: ./test.yaml
-      target: /test.yaml
+      source: ./split.yaml
+      target: /split.yaml
   proxy:
     image: envoyproxy/envoy:v1.16.2
     volumes:

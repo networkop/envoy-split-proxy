@@ -1,0 +1,26 @@
+interface: eth0
+urls:
+## Netflix
+- netflix.com
+- "*.nflxvideo.net"
+- "*.nflxext.com"
+- "*.nflxso.net"
+- nflximg.com
+- netflix.net
+## BBC iPlayer
+- "*.bbc.co.uk"
+- "*.bbc.com"
+- "*.bbc.net.uk"
+- "*.bbci.co.uk"
+- ifconfig.me
+- "*.bbctvapps.co.uk"
+- "*.llnwi.net"
+- "*.akamaized.net"
+## Amazon Prime
+- "*.media-amazon.com"
+- "*.atv-ext.amazon.com"
+- "*.aiv-cdn.net"
+- "*.amazon.co.uk"
+- "*.aiv-delivery.net"
+- "*.amazonvideo.com"
+- "atv-ext-eu.amazon.com"
