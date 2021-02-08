@@ -14,10 +14,11 @@ On your client device, redirect all traffic to the box that will be running Envo
 ip route add default via <IP_OF_ARM_BOX> metric 10
 ```
 
-On the ARM box set up an iptables redirect to send all HTTPS traffic to envoy:
+On the ARM box set up an iptables redirect to send all HTTP and HTTPS traffic to envoy:
 
 ```
 sudo iptables -t nat -A PREROUTING -p tcp --dport 443 -j REDIRECT --to-port 10000
+sudo iptables -t nat -A PREROUTING -p tcp --dport 80 -j REDIRECT --to-port 10001
 ```
 
 Copy `envoy.yaml` and `split.yaml` into your `pwd` and run:
