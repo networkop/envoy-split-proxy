@@ -1,7 +1,6 @@
 package config
 
 import (
-	"fmt"
 	"net"
 
 	"github.com/sirupsen/logrus"
@@ -33,24 +32,24 @@ func NewWatcher(file string) (*Data, error) {
 }
 
 // Sync sends the desired state over the channel
-func (d *Data) Sync(out chan *Data) error {
+func (d *Data) Sync(out chan *Data) {
 	logrus.Debugf("Sending the initial parsed state: %+v", d)
 	out <- d
 
 	watcher, err := fsnotify.NewWatcher()
 	if err != nil {
-		return fmt.Errorf("Failed to initialise fsnotify: %s", err)
+		logrus.Panicf("Failed to initialise fsnotify: %s", err)
 	}
 	defer watcher.Close()
 
 	logrus.Infof("Starting a watch on a file %s", d.file)
 	if err := watcher.Add(d.file); err != nil {
-		return err
+		logrus.Panicf("Error watching the configuration file: %s", err)
 	}
 
 	for {
 		select {
-		case _ = <-watcher.Events:
+		case <-watcher.Events:
 			if err = d.newFromFile(); err != nil {
 				logrus.Infof("Error parsing the configuration file: %s", err)
 				logrus.Info("Using the previous version of config")

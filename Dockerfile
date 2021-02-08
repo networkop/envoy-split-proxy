@@ -2,7 +2,8 @@
 FROM --platform=${BUILDPLATFORM} golang:1.15.6-buster as builder
 
 WORKDIR /src
-ENV CGO_ENABLED=0
+ARG LDFLAGS
+
 
 COPY go.mod .
 COPY go.sum .
@@ -11,10 +12,7 @@ RUN go mod download
 
 COPY . .
 
-ARG TARGETOS
-ARG TARGETARCH
-
-RUN GOOS=${TARGETOS} GOARCH=${TARGETARCH} go build -a -o envoy-split-proxy .
+RUN CGO_ENABLED=0 GOOS=linux GO111MODULE=on go build -ldflags "${LDFLAGS}" -o envoy-split-proxy .
 
 
 FROM gcr.io/distroless/static:nonroot

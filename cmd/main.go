@@ -17,7 +17,6 @@ var (
 	httpsPort  = flag.Int("https-port", 10000, "envoy https listener port")
 	httpPort   = flag.Int("http-port", 10001, "envoy http listener port")
 	grpcURL    = flag.String("grpc", ":18000", "GRPC URL to listen on for incoming connections from Envoy (default: ':18000')")
-	cleanup    = flag.Bool("cleanup", false, "cleanup any created configuration")
 )
 
 // Run kicks off the main control loops
