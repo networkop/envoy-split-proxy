@@ -12,7 +12,11 @@ RUN go mod download
 
 COPY . .
 
-RUN CGO_ENABLED=0 GOOS=linux GO111MODULE=on go build -ldflags "${LDFLAGS}" -o envoy-split-proxy .
+ENV CGO_ENABLED=0
+ARG TARGETOS
+ARG TARGETARCH
+
+RUN GOOS=${TARGETOS} GOARCH=${TARGETARCH} go build -ldflags "${LDFLAGS}" -o envoy-split-proxy .
 
 
 FROM gcr.io/distroless/static:nonroot
