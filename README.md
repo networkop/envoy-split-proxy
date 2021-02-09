@@ -93,6 +93,6 @@ The above can be summarised to the following two configuration lines
 To check to current list of bypassed domain names from a host running envoy do:
 
 ```
-curl localhost:19000/    | jq '.configs[2].dynamic_listeners[0].active_state.listener.filter_chains[0].filter_chain_match.server_names'
+curl localhost:19000/config_dump | jq '.configs[2]'
 ```
 

@@ -1,5 +1,7 @@
 interface: eth0
 urls:
+## Testing
+- ifconfig.me
 ## Netflix
 - netflix.com
 - "*.nflxvideo.net"
@@ -12,7 +14,6 @@ urls:
 - "*.bbc.com"
 - "*.bbc.net.uk"
 - "*.bbci.co.uk"
-- ifconfig.me
 - "*.bbctvapps.co.uk"
 - "*.llnwi.net"
 - "*.akamaized.net"
