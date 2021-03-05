@@ -4,6 +4,7 @@ import (
 	"context"
 	"log"
 	"net"
+	"regexp"
 	"time"
 
 	api "github.com/envoyproxy/go-control-plane/envoy/api/v2"
@@ -40,6 +41,7 @@ var (
 	bypassHTTPCluster        = bypassClusterName + "-http"
 	defaultHTTPSListenerName = prefix + "-https-listener"
 	defaultHTTPListenerName  = prefix + "-http-listener"
+	partialWildCard          = regexp.MustCompile(`\*\.[^\d]+`)
 )
 
 // Envoy stores the XDS server configuration
@@ -272,7 +274,7 @@ func buildListener(urls []string, httpsPort, httpPort int) []types.Resource {
 			FilterChains: []*listener.FilterChain{
 				{
 					FilterChainMatch: &listener.FilterChainMatch{
-						ServerNames: urls,
+						ServerNames: excludePartialWildCards(urls),
 					},
 					Filters: []*listener.Filter{
 						{
@@ -321,4 +323,15 @@ func makeAny(pb proto.Message) *any.Any {
 		panic(err.Error())
 	}
 	return any
+}
+
+func excludePartialWildCards(urls []string) []string {
+	var output []string
+	for _, url := range urls {
+		if partialWildCard.MatchString(url) {
+			output = append(output, url)
+		}
+
+	}
+	return output
 }

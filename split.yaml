@@ -3,10 +3,11 @@ urls:
 ## Testing
 - ifconfig.me
 ## Netflix
-- netflix.com
+- "*.netflix.com"
 - "*.nflxvideo.net"
 - "*.nflxext.com"
 - "*.nflxso.net"
+- "81.130.98.*"
 - nflximg.com
 - netflix.net
 ## BBC iPlayer
