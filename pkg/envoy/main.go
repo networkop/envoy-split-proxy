@@ -185,6 +185,9 @@ func buildListener(urls []string, httpsPort, httpPort int) []types.Resource {
 									//GenerateRequestId: &wrappers.BoolValue{Value: false},
 									StreamIdleTimeout: &duration.Duration{Seconds: 300},
 									StatPrefix:        prefix,
+									UpgradeConfigs: []*http.HttpConnectionManager_UpgradeConfig{
+										{UpgradeType: "websocket"},
+									},
 									HttpFilters: []*http.HttpFilter{
 										{
 											Name: "http-filter",

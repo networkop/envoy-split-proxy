@@ -1,5 +1,5 @@
 # Build the main binary
-FROM --platform=${BUILDPLATFORM} golang:1.15.6-buster as builder
+FROM --platform=${BUILDPLATFORM} golang:1.22-bookworm as builder
 
 WORKDIR /src
 ARG LDFLAGS

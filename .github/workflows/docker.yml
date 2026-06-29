@@ -1,10 +1,12 @@
 name: docker
 
+# This workflow is disabled. Multi-arch image builds (amd64 + arm64) pushed to
+# ghcr.io are handled by docker-publish.yml, which correctly sets up QEMU and
+# Docker Buildx. Leaving this file here for reference only.
 on:
-  push:
-    branches: [ main ]
-  pull_request:
-    branches: [ main ]
+  workflow_dispatch:
+    branches:
+      - _disabled
 
 jobs:
   docker:
