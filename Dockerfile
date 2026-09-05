@@ -19,9 +19,14 @@ ARG TARGETARCH
 RUN GOOS=${TARGETOS} GOARCH=${TARGETARCH} go build -ldflags "${LDFLAGS}" -o envoy-split-proxy .
 
 
-FROM gcr.io/distroless/static:nonroot
+# alpine rather than distroless/static: -iptables shells out to the iptables
+# binary, matching how smart-vpn-client manages rules on the same hosts.
+FROM alpine:3.21
+
+RUN apk upgrade --no-cache && \
+    apk add --no-cache iptables iptables-legacy
+
 WORKDIR /
 COPY --from=builder /src/envoy-split-proxy .
-USER nonroot:nonroot
 
 ENTRYPOINT ["/envoy-split-proxy"]

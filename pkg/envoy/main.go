@@ -27,6 +27,7 @@ import (
 	wrappers "github.com/golang/protobuf/ptypes/wrappers"
 	"github.com/networkop/envoy-split-proxy/pkg/config"
 	"github.com/sirupsen/logrus"
+	"golang.org/x/sys/unix"
 	"google.golang.org/grpc"
 )
 
@@ -45,14 +46,15 @@ var (
 
 // Envoy stores the XDS server configuration
 type Envoy struct {
-	cache     cache.SnapshotCache
-	nodeID    string
-	httpsPort int
-	httpPort  int
+	cache      cache.SnapshotCache
+	nodeID     string
+	httpsPort  int
+	httpPort   int
+	bypassMark int
 }
 
 // NewServer creates a new XDS server
-func NewServer(grpcURL string, nodeID string, httpsPort, httpPort int) (*Envoy, error) {
+func NewServer(grpcURL string, nodeID string, httpsPort, httpPort, bypassMark int) (*Envoy, error) {
 
 	snapshotCache := cache.NewSnapshotCache(false, cache.IDHash{}, nil)
 
@@ -74,10 +76,11 @@ func NewServer(grpcURL string, nodeID string, httpsPort, httpPort int) (*Envoy, 
 	}()
 
 	return &Envoy{
-		cache:     snapshotCache,
-		nodeID:    nodeID,
-		httpsPort: httpsPort,
-		httpPort:  httpPort,
+		cache:      snapshotCache,
+		nodeID:     nodeID,
+		httpsPort:  httpsPort,
+		httpPort:   httpPort,
+		bypassMark: bypassMark,
 	}, nil
 }
 
@@ -87,7 +90,7 @@ func (e *Envoy) Configure(in chan *config.Data) {
 	for d := range in {
 		logrus.Infof("Received new config: %+v", d)
 
-		cluster := buildCluster(d.IP.String())
+		cluster := buildCluster(d.IP.String(), e.bypassMark)
 		listener := buildListener(d.URLs, e.httpsPort, e.httpPort)
 		snapshot := cache.NewSnapshot(time.Now().String(), nil, cluster, nil, listener, nil, nil)
 		err := e.cache.SetSnapshot(e.nodeID, snapshot)
@@ -100,21 +103,33 @@ func (e *Envoy) Configure(in chan *config.Data) {
 	}
 }
 
-func buildCluster(ip string) []types.Resource {
+func buildCluster(ip string, mark int) []types.Resource {
 	defaultTLSCluster := newEnvoyTLSCluster(defaultTLSCluster)
 	defaultHTTPCluster := newEnvoyHTTPCluster(defaultHTTPCluster)
 
 	bypassTLSCluster := newEnvoyTLSCluster(bypassTLSCluster)
 	bypassHTTPCluster := newEnvoyHTTPCluster(bypassHTTPCluster)
-	bypassTLSCluster.UpstreamBindConfig = &core.BindConfig{
-		SourceAddress: &core.SocketAddress{
-			Address: ip,
-			PortSpecifier: &core.SocketAddress_PortValue{
-				PortValue: uint32(0),
-			},
-		},
-	}
-	bypassHTTPCluster.UpstreamBindConfig = &core.BindConfig{
+	bypassTLSCluster.UpstreamBindConfig = newBypassBindConfig(ip, mark)
+	bypassHTTPCluster.UpstreamBindConfig = newBypassBindConfig(ip, mark)
+
+	return []types.Resource{defaultTLSCluster, bypassTLSCluster, defaultHTTPCluster, bypassHTTPCluster}
+}
+
+// newBypassBindConfig binds the upstream socket to the bypass interface's
+// address and, when mark is non-zero, tags it with SO_MARK.
+//
+// The source address alone only decides which IP the packet carries, not which
+// route it takes: with a full-tunnel VPN installing a catch-all ip rule, bound
+// traffic still leaves via the tunnel and is masqueraded to the tunnel address,
+// so the bypass silently does nothing. The fwmark is what the host policy rule
+// matches on, e.g.
+//
+//	ip rule add fwmark 0x51821 lookup <bypass table> priority 150
+//
+// SO_MARK must be set before connect(), hence STATE_PREBIND, and requires
+// CAP_NET_ADMIN in the Envoy container.
+func newBypassBindConfig(ip string, mark int) *core.BindConfig {
+	bind := &core.BindConfig{
 		SourceAddress: &core.SocketAddress{
 			Address: ip,
 			PortSpecifier: &core.SocketAddress_PortValue{
@@ -123,7 +138,23 @@ func buildCluster(ip string) []types.Resource {
 		},
 	}
 
-	return []types.Resource{defaultTLSCluster, bypassTLSCluster, defaultHTTPCluster, bypassHTTPCluster}
+	if mark == 0 {
+		logrus.Debug("Bypass fwmark disabled, relying on source address routing only")
+		return bind
+	}
+
+	logrus.Debugf("Marking bypass upstream sockets with fwmark %#x", mark)
+	bind.SocketOptions = []*core.SocketOption{
+		{
+			Description: "bypass fwmark",
+			Level:       unix.SOL_SOCKET,
+			Name:        unix.SO_MARK,
+			Value:       &core.SocketOption_IntValue{IntValue: int64(mark)},
+			State:       core.SocketOption_STATE_PREBIND,
+		},
+	}
+
+	return bind
 }
 
 func newEnvoyTLSCluster(name string) *api.Cluster {

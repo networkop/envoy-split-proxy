@@ -14,7 +14,14 @@ On your client device, redirect all traffic to the box that will be running Envo
 ip route add default via <IP_OF_ARM_BOX> metric 10
 ```
 
-On the ARM box set up an iptables redirect to send all HTTP and HTTPS traffic to envoy:
+On the box, traffic reaching it has to be redirected to Envoy's listeners. Pass
+`-iptables` and `envoy-split-proxy` manages those rules itself, keeping them in
+step with `-https-port`/`-http-port` and removing them again on shutdown -- a
+stopped proxy otherwise leaves `PREROUTING` pointing at a closed port and
+black-holes web traffic for every client behind the box. It needs
+`CAP_NET_ADMIN`.
+
+To do it by hand instead, omit `-iptables` and add:
 
 ```
 sudo iptables -t nat -A PREROUTING -p tcp --dport 443 -j REDIRECT --to-port 10000
@@ -26,10 +33,63 @@ Copy `envoy.yaml` and `split.yaml` into your `pwd` and run:
 ```
 docker run --name envoy -d --net=host -v $(pwd)/envoy.yaml:/etc/envoy/envoy.yaml envoyproxy/envoy:v1.16.2 --config-path /etc/envoy/envoy.yaml
 
-docker run --name app -d --net=host -v $(pwd)/split.yaml:/split.yaml networkop/envoy-split-proxy -conf /split.yaml
+docker run --name app -d --net=host --cap-add=NET_ADMIN -v $(pwd)/split.yaml:/split.yaml ghcr.io/networkop/envoy-split-proxy -conf /split.yaml -iptables
 ```
 
+Or just use [run.sh](./run.sh), which starts both with the right capabilities.
+
 All traffic is now (L7-)transparently proxied by Envoy and all domains specified in `split.yaml` are redirected to the interface specificed.
+
+
+## Host routing prerequisite
+
+Envoy binds bypassed upstream sockets to the bypass interface's address and tags
+them with an fwmark (`-bypass-mark`, default `0x51821`). **Neither of those
+chooses a route** -- the host still has to be told what to do with marked
+packets:
+
+```
+ip route replace default via <LAN_GATEWAY> dev eth0 table 200
+ip rule add fwmark 0x51821 lookup 200 priority 150
+```
+
+Without that rule the bypass silently does nothing. This matters most when the
+box also runs a full-tunnel VPN: the VPN's catch-all `ip rule` wins, marked
+packets go down the tunnel, and the VPN's `MASQUERADE` rewrites the source to
+the tunnel address. Connections succeed, Envoy logs and stats look perfectly
+healthy, and the only observable symptom is that the far end sees the VPN's exit
+address instead of yours.
+
+Verify the policy without sending any traffic -- `ip route get ... mark` asks
+the kernel exactly what the rule decides:
+
+```
+$ ip route get 1.1.1.1 mark 0x51821     # bypassed -> native interface
+1.1.1.1 via 172.16.0.1 dev eth0 table 200
+$ ip route get 1.1.1.1                  # everything else -> tunnel
+1.1.1.1 dev wg-pia table 51820 src 10.31.196.44
+```
+
+Then confirm end to end. Every Netflix OCA response carries the address the
+server actually saw, which is the only signal that catches a silent leak:
+
+```
+docker logs --since 3m envoy 2>&1 | grep -o 'addr=[0-9.]*' | sort -u
+```
+
+If you are running with `-bypass-mark 0` instead, the equivalent checks are
+`ip route get 1.1.1.1 from <BYPASS_IP>` and
+`curl -s --interface <BYPASS_IP> ifconfig.me`.
+
+`SO_MARK` is applied by Envoy to its own upstream sockets, so `CAP_NET_ADMIN`
+goes on the **envoy** container, not on `envoy-split-proxy` -- the latter only
+serves the xDS config describing the option. See [run.sh](./run.sh). Passing
+`-bypass-mark 0` disables marking and falls back to source-address rules
+(`ip rule add from <BYPASS_IP> ...`), which needs no extra capability but is
+broader: any process binding an outbound socket to that address escapes too.
+
+See [docs/vpn-agent-integration.md](docs/vpn-agent-integration.md) for wiring
+this into [smart-vpn-client](https://github.com/networkop/smart-vpn-client).
 
 
 ## Discovering domain names

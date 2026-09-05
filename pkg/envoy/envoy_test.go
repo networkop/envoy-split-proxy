@@ -2,7 +2,11 @@ package envoy
 
 import (
 	"reflect"
+	"strings"
 	"testing"
+
+	api "github.com/envoyproxy/go-control-plane/envoy/api/v2"
+	core "github.com/envoyproxy/go-control-plane/envoy/api/v2/core"
 )
 
 func TestFilterPartialWildcard(t *testing.T) {
@@ -58,5 +62,43 @@ func TestWithDefaultPort(t *testing.T) {
 	got := withDefaultPort(input)
 	if !reflect.DeepEqual(got, want) {
 		t.Errorf("wanted %v, got: %v", want, got)
+	}
+}
+
+func TestBypassBindConfig(t *testing.T) {
+	withMark := newBypassBindConfig("172.16.0.90", 0x51821)
+	if got := withMark.GetSourceAddress().GetAddress(); got != "172.16.0.90" {
+		t.Errorf("wanted source 172.16.0.90, got: %v", got)
+	}
+	opts := withMark.GetSocketOptions()
+	if len(opts) != 1 {
+		t.Fatalf("wanted 1 socket option, got: %d", len(opts))
+	}
+	if opts[0].GetIntValue() != 0x51821 {
+		t.Errorf("wanted mark 0x51821, got: %#x", opts[0].GetIntValue())
+	}
+	if opts[0].GetState() != core.SocketOption_STATE_PREBIND {
+		t.Errorf("SO_MARK must be applied pre-bind, got state: %v", opts[0].GetState())
+	}
+
+	// a zero mark leaves the socket untouched, so no CAP_NET_ADMIN is needed
+	if opts := newBypassBindConfig("172.16.0.90", 0).GetSocketOptions(); len(opts) != 0 {
+		t.Errorf("wanted no socket options when mark is 0, got: %d", len(opts))
+	}
+}
+
+func TestBuildClusterOnlyMarksBypass(t *testing.T) {
+	for _, r := range buildCluster("172.16.0.90", 0x51821) {
+		c := r.(*api.Cluster)
+		bind := c.GetUpstreamBindConfig()
+		if strings.Contains(c.GetName(), "-bypass-") {
+			if bind == nil || len(bind.GetSocketOptions()) != 1 {
+				t.Errorf("%s: bypass cluster must carry the fwmark", c.GetName())
+			}
+			continue
+		}
+		if bind != nil {
+			t.Errorf("%s: default cluster must not bind or mark its sockets", c.GetName())
+		}
 	}
 }

@@ -22,7 +22,8 @@ CDS/LDS over gRPC and keeps the snapshot in sync with the config file.
 | `pkg/config/parser.go` | Parses `split.yaml`, resolves the interface to its first IPv4 address via netlink, dedups URLs, does idempotent state updates. |
 | `pkg/config/watcher.go` | fsnotify watch on the config file; re-parses and pushes changed state onto the channel. |
 | `pkg/envoy/main.go` | Builds the xDS snapshot (2 listeners, 4 clusters) and serves it over gRPC. |
-| `pkg/envoy/envoy_test.go` | Unit test for `excludePartialWildCards`. |
+| `pkg/envoy/envoy_test.go` | Unit tests for the SNI/vhost domain rules and the bypass bind config. |
+| `pkg/iptables/redirect.go` | Optional (`-iptables`) management of the nat PREROUTING REDIRECT rules; idempotent via `-C`, removed on SIGTERM. Shells out, so the image is alpine rather than distroless. |
 | `envoy.yaml` | Envoy bootstrap: node id `split`, dynamic CDS/LDS pointing at `127.0.0.1:18000`, admin on `:19000`. |
 | `split.yaml` | Example user config (`interface:` + `urls:`). |
 | `docker-compose.yaml`, `run.sh` | Local/dev run helpers. |
@@ -41,9 +42,14 @@ CDS/LDS over gRPC and keeps the snapshot in sync with the config file.
     domains; the second is the catch-all default chain.
   - HTTP (`-http-port`, default 10001): HTTP connection manager with a
     dynamic_forward_proxy filter; bypass domains become a separate virtual host.
-- **Four clusters:** default/bypass × TLS/HTTP. The bypass clusters differ only by
-  having `UpstreamBindConfig.SourceAddress` set to the bypass interface IP — that
-  bind is the entire mechanism by which traffic leaves the other interface.
+- **Four clusters:** default/bypass × TLS/HTTP. The bypass clusters differ only in
+  their `UpstreamBindConfig`: the source address is set to the bypass interface
+  IP, and `SO_MARK` is set to `-bypass-mark` (default `0x51821`, 0 disables) via
+  `SocketOptions` at `STATE_PREBIND`. Neither picks a route — the host needs an
+  `ip rule` matching that mark, or the bypass silently does nothing. See the
+  README's "Host routing prerequisite" and `docs/vpn-agent-integration.md`.
+  `SO_MARK` is applied by Envoy to its own upstream sockets, so `CAP_NET_ADMIN`
+  belongs on the **envoy** container, not on this control plane.
 - **Host header ports.** Envoy 1.16 matches virtual host domains against the raw
   `:authority`, and `strip_matching_host_port` does not exist in the v2 HCM API.
   Clients that send the default port (the Netflix LG TV app does, for its Pushy
