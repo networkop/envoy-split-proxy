@@ -9,10 +9,14 @@ import (
 
 // Data stores the desire state of the app
 type Data struct {
-	URLs    []string
-	IP      net.IP
-	file    string
-	Changed bool
+	URLs []string
+	IP   net.IP
+	// Interface is the bypass interface's name. Carried alongside IP so the
+	// policy routing manager can find the native default route without
+	// re-parsing the config file.
+	Interface string
+	file      string
+	Changed   bool
 }
 
 // NewWatcher builds new configuration file watcher

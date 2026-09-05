@@ -43,15 +43,60 @@ All traffic is now (L7-)transparently proxied by Envoy and all domains specified
 
 ## Host routing prerequisite
 
-Envoy binds bypassed upstream sockets to the bypass interface's address and tags
-them with an fwmark (`-bypass-mark`, default `0x51821`). **Neither of those
-chooses a route** -- the host still has to be told what to do with marked
-packets:
+Envoy binds bypassed upstream sockets to the bypass interface's address.
+**That only sets the source IP -- it does not choose a route.** Something has to
+tell the kernel what to do with those packets, or the bypass silently does
+nothing.
+
+Pass `-ip-rule` and `envoy-split-proxy` manages it, installing the equivalent of
 
 ```
 ip route replace default via <LAN_GATEWAY> dev eth0 table 200
+ip rule add from <BYPASS_IP> lookup 200 priority 150
+```
+
+on startup and removing them on shutdown. The gateway comes from the main
+table's default route via the bypass interface, so it follows DHCP; the rule is
+reinstalled if the interface's address changes. Requires `CAP_NET_ADMIN`.
+`-rule-table` and `-rule-priority` override the defaults.
+
+Priority 150 is load-bearing: below any `lookup main suppress_prefixlength 0`
+rule so LAN destinations still resolve from the main table, and above a VPN's
+catch-all so bypassed traffic beats the tunnel.
+
+`-bypass-mark <n>` additionally tags the sockets with `SO_MARK`, letting the
+rule match on the mark instead:
+
+```
 ip rule add fwmark 0x51821 lookup 200 priority 150
 ```
+
+That is narrower -- only Envoy's bypass sockets carry the mark, whereas any
+process binding that source address matches the first form.
+
+It is off by default because Envoy **aborts the connection** when a socket
+option cannot be applied, so on a host that refuses `SO_MARK` it breaks every
+bypassed connection rather than degrading.
+
+`CAP_NET_ADMIN` goes on the **envoy** container -- Envoy sets the option on its
+own sockets; the control plane only describes it.
+
+**Known not to work on Synology DSM.** Observed there: the container runs as
+uid 0, `CapEff` contains `CAP_NET_ADMIN` (bit 12), the network namespace is the
+host's, no user namespace is in use, and `--privileged` is set -- and
+`setsockopt(SOL_SOCKET, SO_MARK)` still returns `EPERM`, while the same mark
+works from the host shell. Cause unidentified. Use `-bypass-mark 0` and steer by
+source address.
+
+Check the host allows it before turning the mark on. Note `ping` takes the mark
+in decimal, unlike `ip rule` (`0x51821` = `333857`):
+
+```
+sudo ping -c1 -m 333857 1.1.1.1
+```
+
+`EPERM` there means the kernel will not let this host set `SO_MARK` at all;
+leave `-bypass-mark 0` and steer by source address.
 
 Without that rule the bypass silently does nothing. This matters most when the
 box also runs a full-tunnel VPN: the VPN's catch-all `ip rule` wins, marked
@@ -60,15 +105,32 @@ the tunnel address. Connections succeed, Envoy logs and stats look perfectly
 healthy, and the only observable symptom is that the far end sees the VPN's exit
 address instead of yours.
 
-Verify the policy without sending any traffic -- `ip route get ... mark` asks
-the kernel exactly what the rule decides:
+`envoy-split-proxy` checks this itself at startup (disable with `-verify`) and
+logs one of:
 
 ```
-$ ip route get 1.1.1.1 mark 0x51821     # bypassed -> native interface
-1.1.1.1 via 172.16.0.1 dev eth0 table 200
-$ ip route get 1.1.1.1                  # everything else -> tunnel
+Bypass check: OK. From 172.16.0.90 -> eth0; everything else -> wg-pia
+Bypass check: NO ip rule selects on 172.16.0.90. Bypassed traffic will follow ...
+Bypass check: traffic from 172.16.0.90 to 1.1.1.1 egresses "wg-pia", not the ...
+Bypass check: ... but so does everything else -- the split is currently a no-op
+```
+
+The check runs whether or not `-ip-rule` is set, so it covers a hand-managed
+rule too. It is never fatal, and no packets are sent -- `ip route get` only asks
+the kernel which route it would pick.
+
+To check by hand, `ip route get` asks the same question -- use `from
+<BYPASS_IP>` or `mark <n>` to match whichever form you installed:
+
+```
+$ ip route get 1.1.1.1 from 172.16.0.90   # bypassed -> native interface
+1.1.1.1 from 172.16.0.90 via 172.16.0.1 dev eth0 table 200
+$ ip route get 1.1.1.1                     # everything else -> tunnel
 1.1.1.1 dev wg-pia table 51820 src 10.31.196.44
 ```
+
+Note `curl --interface <BYPASS_IP>` only exercises the source-address form; it
+does not set a mark, so it will appear to fail against an fwmark-only rule.
 
 Then confirm end to end. Every Netflix OCA response carries the address the
 server actually saw, which is the only signal that catches a silent leak:
@@ -77,9 +139,9 @@ server actually saw, which is the only signal that catches a silent leak:
 docker logs --since 3m envoy 2>&1 | grep -o 'addr=[0-9.]*' | sort -u
 ```
 
-If you are running with `-bypass-mark 0` instead, the equivalent checks are
-`ip route get 1.1.1.1 from <BYPASS_IP>` and
-`curl -s --interface <BYPASS_IP> ifconfig.me`.
+`SO_MARK` is applied by Envoy to its own upstream sockets, so if you do enable
+`-bypass-mark`, `CAP_NET_ADMIN` goes on the **envoy** container, not on this
+control plane.
 
 `SO_MARK` is applied by Envoy to its own upstream sockets, so `CAP_NET_ADMIN`
 goes on the **envoy** container, not on `envoy-split-proxy` -- the latter only

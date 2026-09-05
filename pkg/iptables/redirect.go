@@ -15,9 +15,14 @@ import (
 	"github.com/sirupsen/logrus"
 )
 
-// DefaultBinary matches what smart-vpn-client uses on the same hosts. The
-// legacy binary writes to the same tables the kernel's iptables_nat module
-// serves, which nft-backed iptables does not always do on older kernels.
+// DefaultBinary matches what smart-vpn-client settled on for the same hosts
+// after two failed attempts (see its commits "fix iptables errors" and
+// "reverting to iptables-legacy").
+//
+// On Synology DSM the nft-backed iptables cannot open the nat table at all --
+// even `iptables -t nat -L` fails with "No chain/target/match by that name" --
+// while the legacy binary drives the ruleset the kernel actually consults.
+// Inspect rules with iptables-legacy too, or they will appear to be missing.
 const DefaultBinary = "iptables-legacy"
 
 // Rule redirects TCP traffic destined for DestPort to a local ToPort.

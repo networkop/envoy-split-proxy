@@ -24,6 +24,8 @@ CDS/LDS over gRPC and keeps the snapshot in sync with the config file.
 | `pkg/envoy/main.go` | Builds the xDS snapshot (2 listeners, 4 clusters) and serves it over gRPC. |
 | `pkg/envoy/envoy_test.go` | Unit tests for the SNI/vhost domain rules and the bypass bind config. |
 | `pkg/iptables/redirect.go` | Optional (`-iptables`) management of the nat PREROUTING REDIRECT rules; idempotent via `-C`, removed on SIGTERM. Shells out, so the image is alpine rather than distroless. |
+| `pkg/route/policy.go` | Optional (`-ip-rule`) management of the policy route and `ip rule` that steer bypassed traffic; gateway derived from the main table's default via the bypass link. |
+| `pkg/route/verify.go` | Startup check (`-verify`, on by default) that the host really does steer bypassed traffic out the bypass interface. Runs regardless of who installed the rules. |
 | `envoy.yaml` | Envoy bootstrap: node id `split`, dynamic CDS/LDS pointing at `127.0.0.1:18000`, admin on `:19000`. |
 | `split.yaml` | Example user config (`interface:` + `urls:`). |
 | `docker-compose.yaml`, `run.sh` | Local/dev run helpers. |
@@ -48,8 +50,12 @@ CDS/LDS over gRPC and keeps the snapshot in sync with the config file.
   `SocketOptions` at `STATE_PREBIND`. Neither picks a route — the host needs an
   `ip rule` matching that mark, or the bypass silently does nothing. See the
   README's "Host routing prerequisite" and `docs/vpn-agent-integration.md`.
-  `SO_MARK` is applied by Envoy to its own upstream sockets, so `CAP_NET_ADMIN`
-  belongs on the **envoy** container, not on this control plane.
+  `SO_MARK` is applied by Envoy to its own upstream sockets, so the privileges
+  belong on the **envoy** container, not on this control plane -- and on
+  Synology DSM `--cap-add=NET_ADMIN` is not enough, `--privileged` is also
+  needed. The mark defaults to 0 (off) because Envoy aborts the connection when
+  a socket option cannot be applied, so enabling it on a host that refuses
+  `SO_MARK` breaks every bypassed connection instead of degrading.
 - **Host header ports.** Envoy 1.16 matches virtual host domains against the raw
   `:authority`, and `strip_matching_host_port` does not exist in the v2 HCM API.
   Clients that send the default port (the Netflix LG TV app does, for its Pushy

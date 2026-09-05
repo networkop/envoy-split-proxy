@@ -59,6 +59,7 @@ func (d *Data) newFromFile() error {
 		return fmt.Errorf("More than 1 URLs must be configured")
 	}
 
+	d.Interface = cfg.Interface
 	d.idempotentUpdate(firstIP, dedup(cfg.URLs))
 
 	return nil

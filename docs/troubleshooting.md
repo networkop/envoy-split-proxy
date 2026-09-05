@@ -97,6 +97,16 @@ Things that look like evidence and are not:
   sample may have been captured during one of those gaps — sample repeatedly.
 - **Envoy's HTTP listener re-resolves the Host header**, so the upstream address
   can legitimately differ from the one the client dialled. Not a fault.
+- **`iptables` and `iptables-legacy` are different rulesets.** On Synology DSM
+  the host's `iptables` is nft-backed and cannot open the `nat` table at all,
+  failing with `No chain/target/match by that name` -- which reads like missing
+  rules but is the wrong binary. `-iptables` uses `iptables-legacy` (as does
+  smart-vpn-client, after the same detour), so inspect with:
+
+  ```bash
+  sudo iptables-legacy -t nat -L PREROUTING -n --line-numbers
+  docker exec app iptables-legacy -t nat -L PREROUTING -n   # same netns
+  ```
 
 ## Already ruled out — do not re-test
 
@@ -132,8 +142,13 @@ docker logs --since 3m envoy 2>&1 | grep -o 'addr=[0-9.]*' | sort -u
 curl -XPOST localhost:19000/reset_counters
 curl -s localhost:19000/stats | grep upstream_cx_total
 
-# which cluster is chosen, and for what
-curl -XPOST 'localhost:19000/logging?router=debug&filter=debug'
+# which cluster is chosen, and for what.
+# Envoy 1.16's /logging takes ONE logger per request; multi-logger support came
+# later, and passing several silently changes nothing but printing the usage.
+curl -XPOST 'localhost:19000/logging?filter=debug'   # tcp_proxy + tls_inspector
+curl -XPOST 'localhost:19000/logging?router=debug'   # http cluster selection
+# ... reproduce, then put it back:
+# curl -XPOST 'localhost:19000/logging?level=info'
 docker logs --since 3m envoy 2>&1 | grep -o "requestedServerName: .*" | sort -u
 docker logs --since 3m envoy 2>&1 | grep -o "cluster 'envoy-split-proxy-[a-z-]*'" | sort | uniq -c
 ```
