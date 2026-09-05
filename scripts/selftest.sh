@@ -15,6 +15,7 @@ HTTP_PORT=${HTTP_PORT:-10001}
 HTTPS_PORT=${HTTPS_PORT:-10000}
 ADMIN_PORT=${ADMIN_PORT:-19000}
 SPLIT=${SPLIT:-./split.yaml}
+APP_CONTAINER=${APP_CONTAINER:-app}
 
 # Must be listed in split.yaml (it is, under "## Testing") and must return the
 # caller's IP as plain text over HTTP.
@@ -79,21 +80,29 @@ for candidate in /sbin/iptables-legacy /usr/sbin/iptables-legacy iptables-legacy
   if command -v "$candidate" >/dev/null 2>&1; then IPT="$candidate"; break; fi
 done
 
-if [ -z "$IPT" ]; then
-  info "no iptables binary, skipping REDIRECT check"
+ipt_out=""
+ipt_via=""
+if [ -n "$IPT" ]; then
+  ipt_out=$($IPT -t nat -L PREROUTING -n 2>&1) && ipt_via="$IPT"
+fi
+
+# Falling back to the app container covers two cases at once: reading the nat
+# table needs root, and on DSM the host's nft-backed iptables cannot open it at
+# all. The container ships iptables-legacy and shares the host network
+# namespace, so it sees exactly the same rules.
+if [ -z "$ipt_via" ] && command -v docker >/dev/null 2>&1; then
+  ipt_out=$(docker exec "$APP_CONTAINER" iptables-legacy -t nat -L PREROUTING -n 2>&1) \
+    && ipt_via="$APP_CONTAINER:iptables-legacy"
+fi
+
+if [ -z "$ipt_via" ]; then
+  info "cannot read nat PREROUTING (tried ${IPT:-no local binary}, then container $APP_CONTAINER)"
 else
-  ipt_out=$($IPT -t nat -L PREROUTING -n 2>&1)
-  if [ $? -ne 0 ]; then
-    # Reading the nat table needs root. Not being able to look is different
-    # from there being nothing there, so do not call it a failure.
-    info "cannot read nat PREROUTING as $(id -un) -- re-run with sudo to check the REDIRECT rules"
+  rules=$(echo "$ipt_out" | grep -c REDIRECT)
+  if [ "$rules" -gt 0 ]; then
+    ok "$rules REDIRECT rule(s) in nat PREROUTING (via $ipt_via)"
   else
-    rules=$(echo "$ipt_out" | grep -c REDIRECT)
-    if [ "$rules" -gt 0 ]; then
-      ok "$rules REDIRECT rule(s) in nat PREROUTING"
-    else
-      bad "no REDIRECT rules in nat PREROUTING ($IPT) -- nothing reaches Envoy"
-    fi
+    bad "no REDIRECT rules in nat PREROUTING (via $ipt_via) -- nothing reaches Envoy"
   fi
 fi
 
