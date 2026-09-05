@@ -111,3 +111,24 @@ curl localhost:19000/config_dump | jq '.configs[2]'
 - Changing flags in `cmd/main.go` requires updating `README.md` and the iptables
   REDIRECT ports documented there (10000 / 10001).
 - Do not commit the built `envoy-split-proxy` binary — it is gitignored.
+
+## Planned work
+
+**Migrate to xDS v3.** Not urgent, but Envoy 1.16.2 is from 2021 and unsupported,
+and v2 was removed from Envoy after that release, so the pin cannot move until
+this happens. It is an API migration, not a version bump:
+
+- `go-control-plane` v0.9.8 -> v0.13.x; imports move from `envoy/api/v2`,
+  `pkg/cache/v2` and `pkg/server/v2` to `config/{listener,cluster,route}/v3`,
+  `pkg/cache/v3`, `pkg/server/v3`.
+- `envoy.yaml` needs `transport_api_version: V3` and `resource_api_version: V3`.
+- **The trap:** `use_original_dst` and the implicit TLS inspector are gone in v3.
+  Both listener filters must be declared explicitly
+  (`envoy.filters.listener.original_dst`, `.tls_inspector`). Miss either and SNI
+  matching silently stops working, which looks exactly like the routing bug that
+  `-bypass-mark` exists to prevent -- verify with a `config_dump` diff against
+  the v2 output, not just by checking the process starts.
+- Bump the Envoy image in `README.md`, `run.sh` and `docker-compose.yaml`
+  together.
+- `strip_matching_host_port` exists on the v3 HTTP connection manager, so
+  `withDefaultPort` can be dropped once this lands.
