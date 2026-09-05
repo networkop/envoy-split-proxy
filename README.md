@@ -88,6 +88,18 @@ host's, no user namespace is in use, and `--privileged` is set -- and
 works from the host shell. Cause unidentified. Use `-bypass-mark 0` and steer by
 source address.
 
+The narrower `ip rule` selectors are not available on older kernels either:
+`uidrange` needs 4.10+ (kernel and iproute2), `ipproto` needs 4.17+. On a 4.4
+kernel `from <address>` is the only option -- see
+[docs/troubleshooting.md](docs/troubleshooting.md#selector-support-by-kernel-version)
+for the comparison and how to probe a host safely.
+
+That is less of a compromise than it reads: a policy rule matches the source in
+the *route lookup*, and an unbound socket has none at that point -- the kernel
+picks the source only after choosing the route. So `from <bypass-ip>` matches
+sockets that deliberately bind that address, not all traffic from the box.
+Locally-originated and transit traffic still follow the default route.
+
 Check the host allows it before turning the mark on. Note `ping` takes the mark
 in decimal, unlike `ip rule` (`0x51821` = `333857`):
 
