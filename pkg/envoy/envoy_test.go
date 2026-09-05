@@ -20,8 +20,17 @@ func TestFilterPartialWildcard(t *testing.T) {
 			output: []string{"*.abc.com"},
 		},
 		{
+			// exact hostnames are valid server_names and must be kept
 			input:  []string{"asd.abc.com", "192.168.1.1"},
-			output: nil,
+			output: []string{"asd.abc.com"},
+		},
+		{
+			input:  []string{"nflximg.com", "netflix.net", "81.130.98.*"},
+			output: []string{"nflximg.com", "netflix.net"},
+		},
+		{
+			input:  []string{"*-bar.foo.com", "*.foo.com"},
+			output: []string{"*.foo.com"},
 		},
 		{
 			input:  []string{"*.abc.com", "*"},
@@ -39,5 +48,15 @@ func TestFilterPartialWildcard(t *testing.T) {
 				t.Errorf("#%d wanted %v, got: %v", i, tt.output, output)
 			}
 		})
+	}
+}
+
+func TestWithDefaultPort(t *testing.T) {
+	input := []string{"*.netflix.com", "81.130.98.*"}
+	want := []string{"*.netflix.com", "*.netflix.com:80", "81.130.98.*", "81.130.98.*:80"}
+
+	got := withDefaultPort(input)
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("wanted %v, got: %v", want, got)
 	}
 }

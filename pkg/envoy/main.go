@@ -4,7 +4,7 @@ import (
 	"context"
 	"log"
 	"net"
-	"regexp"
+	"strings"
 	"time"
 
 	api "github.com/envoyproxy/go-control-plane/envoy/api/v2"
@@ -41,7 +41,6 @@ var (
 	bypassHTTPCluster        = bypassClusterName + "-http"
 	defaultHTTPSListenerName = prefix + "-https-listener"
 	defaultHTTPListenerName  = prefix + "-http-listener"
-	partialWildCard          = regexp.MustCompile(`\*\.[^\d]+`)
 )
 
 // Envoy stores the XDS server configuration
@@ -231,7 +230,7 @@ func buildListener(urls []string, httpsPort, httpPort int) []types.Resource {
 												},
 												{
 													Name:    "default-bypass",
-													Domains: urls,
+													Domains: withDefaultPort(urls),
 													Routes: []*route.Route{
 														{
 															Match: &route.RouteMatch{
@@ -328,13 +327,53 @@ func makeAny(pb proto.Message) *any.Any {
 	return any
 }
 
+// excludePartialWildCards drops entries that Envoy will not accept in a filter
+// chain's server_names, keeping exact hostnames ("nflximg.com") and full leading
+// label wildcards ("*.netflix.com"). Partial wildcards ("*-bar.foo.com"), bare
+// "*" and IP-shaped entries ("81.130.98.*", "192.168.1.1") are rejected: the
+// first two are invalid there and the last can never appear as an SNI value.
 func excludePartialWildCards(urls []string) []string {
 	var output []string
 	for _, url := range urls {
-		if partialWildCard.MatchString(url) {
+		if validServerName(url) {
 			output = append(output, url)
 		}
 
 	}
 	return output
+}
+
+// withDefaultPort pairs every entry with an explicit ":80" form. Envoy 1.16
+// matches virtual host domains against the :authority header verbatim, and
+// clients are free to send the default port (Netflix's TV app does exactly that
+// for its Pushy websocket: "nrdp.push.prod.netflix.com:80"), which would
+// otherwise fall through to the catch-all vhost and miss the bypass.
+func withDefaultPort(urls []string) []string {
+	output := make([]string, 0, len(urls)*2)
+	for _, url := range urls {
+		output = append(output, url, url+":80")
+	}
+	return output
+}
+
+func validServerName(name string) bool {
+	if name == "" || name == "*" {
+		return false
+	}
+
+	if strings.HasPrefix(name, "*.") {
+		rest := name[2:]
+		// "*.1.1.1" and friends are IP ranges, not domain wildcards
+		if rest == "" || (rest[0] >= '0' && rest[0] <= '9') {
+			return false
+		}
+		return !strings.Contains(rest, "*")
+	}
+
+	// an exact name must not carry a wildcard anywhere, and a bare IP literal
+	// is never sent as an SNI value
+	if strings.Contains(name, "*") {
+		return false
+	}
+	return net.ParseIP(name) == nil
 }
