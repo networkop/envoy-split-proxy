@@ -101,6 +101,16 @@ curl localhost:19000/config_dump | jq '.configs[2]'
 - The published image is `ghcr.io/networkop/envoy-split-proxy`. Older docs may
   still reference Docker Hub (`networkop/...`); prefer ghcr.io for new references.
 
+## Debugging a broken bypass
+
+**Read [docs/troubleshooting.md](docs/troubleshooting.md) before investigating a
+routing or bypass fault.** The short version: Envoy cannot observe routing, so a
+healthy-looking Envoy proves nothing about which interface packets left by. Get
+an external witness (`addr=` in OCA responses, `ip route get ... mark`) before
+reading Envoy logs, and work the bisection ladder in that document rather than
+guessing at config. It also lists theories already eliminated with evidence, so
+they do not get re-tested.
+
 ## Gotchas
 
 - Root `main.go` and `cmd/main.go` are both `package main`/`package cmd` — the

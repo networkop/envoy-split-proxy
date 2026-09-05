@@ -150,6 +150,9 @@ The above can be summarised to the following two configuration lines
 
 ## Troubleshooting
 
+See [docs/troubleshooting.md](docs/troubleshooting.md) for a structured approach
+to bypass and routing faults, including the traps that make them hard to spot.
+
 To check to current list of bypassed domain names from a host running envoy do:
 
 ```
