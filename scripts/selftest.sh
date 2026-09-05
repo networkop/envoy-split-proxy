@@ -13,6 +13,7 @@
 
 HTTP_PORT=${HTTP_PORT:-10001}
 HTTPS_PORT=${HTTPS_PORT:-10000}
+ADMIN_PORT=${ADMIN_PORT:-19000}
 SPLIT=${SPLIT:-./split.yaml}
 
 # Must be listed in split.yaml (it is, under "## Testing") and must return the
@@ -71,25 +72,48 @@ fi
 
 echo "== interception =="
 
-IPT=$(command -v iptables-legacy 2>/dev/null || command -v iptables 2>/dev/null)
+# DSM's nft-backed iptables cannot open the nat table at all, so prefer the
+# legacy binary; looking with the wrong one makes present rules appear missing.
+IPT=""
+for candidate in /sbin/iptables-legacy /usr/sbin/iptables-legacy iptables-legacy iptables; do
+  if command -v "$candidate" >/dev/null 2>&1; then IPT="$candidate"; break; fi
+done
+
 if [ -z "$IPT" ]; then
   info "no iptables binary, skipping REDIRECT check"
 else
-  # DSM's nft-backed iptables cannot open the nat table; iptables-legacy can.
-  rules=$($IPT -t nat -L PREROUTING -n 2>/dev/null | grep -c REDIRECT)
-  case "$rules" in
-    0|"") bad "no REDIRECT rules in nat PREROUTING ($IPT) -- nothing reaches Envoy" ;;
-    *)    ok  "$rules REDIRECT rule(s) in nat PREROUTING" ;;
-  esac
+  ipt_out=$($IPT -t nat -L PREROUTING -n 2>&1)
+  if [ $? -ne 0 ]; then
+    # Reading the nat table needs root. Not being able to look is different
+    # from there being nothing there, so do not call it a failure.
+    info "cannot read nat PREROUTING as $(id -un) -- re-run with sudo to check the REDIRECT rules"
+  else
+    rules=$(echo "$ipt_out" | grep -c REDIRECT)
+    if [ "$rules" -gt 0 ]; then
+      ok "$rules REDIRECT rule(s) in nat PREROUTING"
+    else
+      bad "no REDIRECT rules in nat PREROUTING ($IPT) -- nothing reaches Envoy"
+    fi
+  fi
 fi
 
-for port in "$HTTPS_PORT" "$HTTP_PORT"; do
-  if nc -z 127.0.0.1 "$port" 2>/dev/null || curl -s -o /dev/null --max-time 2 "http://127.0.0.1:$port" 2>/dev/null; then
-    ok "listener on port $port is accepting"
-  else
-    bad "nothing accepting on port $port"
-  fi
-done
+# Ask Envoy which listeners it has rather than probing the ports. The https
+# listener uses use_original_dst, so a connection from localhost resolves to
+# Envoy itself and can never succeed -- probing it proves nothing either way.
+listeners=$(curl -s --max-time 5 "http://127.0.0.1:$ADMIN_PORT/listeners" 2>/dev/null)
+if [ -z "$listeners" ]; then
+  bad "Envoy admin on port $ADMIN_PORT is not responding -- is the envoy container running?"
+  envoy_up=0
+else
+  envoy_up=1
+  for port in "$HTTPS_PORT" "$HTTP_PORT"; do
+    if echo "$listeners" | grep -q ":$port\$\|:$port[^0-9]"; then
+      ok "Envoy has a listener on port $port"
+    else
+      bad "Envoy has no listener on port $port"
+    fi
+  done
+fi
 
 echo "== egress addresses =="
 
@@ -107,6 +131,14 @@ else
 fi
 
 echo "== through envoy =="
+
+if [ "$envoy_up" != "1" ]; then
+  info "skipped, Envoy is not reachable"
+  echo
+  echo "$pass passed, $fail failed"
+  [ "$fail" -eq 0 ]
+  exit
+fi
 
 # The HTTP listener routes on the Host header via dynamic_forward_proxy, so it
 # can be driven directly. The response body is the address the remote server
