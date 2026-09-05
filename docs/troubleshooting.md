@@ -108,6 +108,30 @@ Things that look like evidence and are not:
   docker exec app iptables-legacy -t nat -L PREROUTING -n   # same netns
   ```
 
+## Selector support by kernel version
+
+The bypass needs an `ip rule` that matches only Envoy's upstream sockets. Which
+selectors exist depends on the kernel and iproute2, and on older ones the source
+address is the only option:
+
+| Selector | Needs | Notes |
+|---|---|---|
+| `from <ip>` | any | Matches any socket that *binds* that address. Unbound sockets carry no source into the route lookup, so ordinary box traffic is unaffected. |
+| `fwmark` | any kernel, but Envoy must be able to set `SO_MARK` | `-bypass-mark`. Refused on Synology DSM even for a root container with `CAP_NET_ADMIN` and `--privileged`, while the same mark works from the host shell. Envoy **aborts the connection** when the option fails, so enabling it there breaks every bypassed connection. |
+| `uidrange` | kernel 4.10+, iproute2 4.10+ | The only true guarantee: a process cannot spoof its UID. Older iproute2 fails with `argument "uidrange" is wrong`. |
+| `ipproto` | kernel 4.17+ | Narrows to TCP. |
+
+Observed on a Synology DSM box: kernel 4.4.59, iproute2-ss160111 -- only `from`
+is available. Verify what a host supports by adding a throwaway rule pointing at
+an **empty** table, so a userland that accepts the rule but silently drops the
+selector cannot divert anything:
+
+```bash
+sudo ip rule add uidrange 1337-1337 lookup 300 priority 151
+ip rule show | grep 151      # the selector must appear in the output
+sudo ip rule del prio 151
+```
+
 ## Already ruled out — do not re-test
 
 Established with evidence during the September 2026 investigation:
