@@ -210,6 +210,37 @@ The above can be summarised to the following two configuration lines
 ```
 
 
+## Verifying it works
+
+[scripts/selftest.sh](./scripts/selftest.sh) checks the whole path from the box,
+without needing a client device. Run it after a reboot, or after changing
+`split.yaml`, the ip rules or the containers:
+
+```
+$ ./scripts/selftest.sh
+== host routing ==
+  ok    ip rule selects on 172.16.0.90
+  ok    traffic from 172.16.0.90 routes via eth0
+  ok    everything else routes via wg-pia
+== interception ==
+  ok    2 REDIRECT rule(s) in nat PREROUTING
+  ok    listener on port 10000 is accepting
+  ok    listener on port 10001 is accepting
+== egress addresses ==
+  ok    reference addresses differ: bypass 203.0.113.42, default 198.51.100.7
+== through envoy ==
+  ok    ifconfig.me via Envoy exits as 203.0.113.42 (bypassed)
+  ok    icanhazip.com via Envoy exits as 198.51.100.7 (default path)
+
+9 passed, 0 failed
+```
+
+It exits non-zero on any failure, so it works as a cron or healthcheck probe.
+The last two checks are the ones that matter: they drive Envoy's HTTP listener
+directly with a `Host` header and read back the address the remote server
+actually saw, which is the only thing that distinguishes a working split from
+one that silently sends everything down the same path.
+
 ## Troubleshooting
 
 See [docs/troubleshooting.md](docs/troubleshooting.md) for a structured approach

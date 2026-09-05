@@ -29,6 +29,7 @@ CDS/LDS over gRPC and keeps the snapshot in sync with the config file.
 | `envoy.yaml` | Envoy bootstrap: node id `split`, dynamic CDS/LDS pointing at `127.0.0.1:18000`, admin on `:19000`. |
 | `split.yaml` | Example user config (`interface:` + `urls:`). |
 | `docker-compose.yaml`, `run.sh` | Local/dev run helpers. |
+| `scripts/selftest.sh` | End-to-end check run on the box: routing, REDIRECT rules, listeners, and the real egress address for both paths. Exits non-zero on failure. |
 | `.github/workflows/` | `ci.yml` (lint + test), `docker-publish.yml` (multi-arch push to ghcr.io). `docker.yml` is intentionally disabled. |
 
 ## Architecture notes an agent must know

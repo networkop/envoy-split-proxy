@@ -125,6 +125,15 @@ The actual cause was that `UpstreamBindConfig` sets a source address but not a
 route, and the VPN's priority-1000 catch-all swallowed the traffic. See the
 README's "Host routing prerequisite".
 
+## Start here
+
+```bash
+./scripts/selftest.sh
+```
+
+Covers routing, interception, and the actual egress address for both paths. If
+it passes, the split is working and the fault is elsewhere.
+
 ## Fast checks, highest signal first
 
 ```bash
