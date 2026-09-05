@@ -88,7 +88,7 @@ func Run() error {
 
 	var router *route.Manager
 	if *manageRule {
-		router = route.NewManager(*ruleTable, *rulePrio)
+		router = route.NewManager(*ruleTable, *rulePrio, *bypassMark)
 		defer router.Remove()
 	}
 
@@ -107,7 +107,7 @@ func Run() error {
 				}
 			}
 			if *verify {
-				route.Verify(d.Interface, d.IP, *probeAddr)
+				route.Verify(d.Interface, d.IP, *probeAddr, *bypassMark)
 			}
 			envoyChan <- d
 		}

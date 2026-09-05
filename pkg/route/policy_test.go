@@ -72,28 +72,60 @@ func TestRuleMatches(t *testing.T) {
 		Src:      &net.IPNet{IP: ip, Mask: net.CIDRMask(32, 32)},
 	}
 
-	if !ruleMatches(mine, ip, 200, 150) {
+	if !ruleMatches(mine, ip, 200, 150, 0) {
 		t.Error("wanted our own rule to match")
 	}
 
 	// Someone else's rule at the same priority must not be adopted or deleted.
 	other := mine
 	other.Table = 51820
-	if ruleMatches(other, ip, 200, 150) {
+	if ruleMatches(other, ip, 200, 150, 0) {
 		t.Error("a rule pointing at another table must not match")
 	}
 
 	// A rule for a different source is a leftover from an old address.
 	stale := mine
 	stale.Src = &net.IPNet{IP: net.ParseIP("172.16.0.91"), Mask: net.CIDRMask(32, 32)}
-	if ruleMatches(stale, ip, 200, 150) {
+	if ruleMatches(stale, ip, 200, 150, 0) {
 		t.Error("a rule for a different source must not match")
 	}
 
 	// The VPN's own catch-all has no Src at all.
 	catchAll := netlink.Rule{Priority: 150, Table: 200}
-	if ruleMatches(catchAll, ip, 200, 150) {
+	if ruleMatches(catchAll, ip, 200, 150, 0) {
 		t.Error("a rule with no source must not match")
+	}
+}
+
+func TestRuleMatchesFwmark(t *testing.T) {
+	ip := net.ParseIP("172.16.0.90")
+	marked := netlink.Rule{Priority: 150, Table: 200, Mark: 0x51821}
+
+	if !ruleMatches(marked, ip, 200, 150, 0x51821) {
+		t.Error("wanted the fwmark rule to match")
+	}
+	// With a mark configured the source is irrelevant, so a source-only rule
+	// left over from a previous run must not be mistaken for ours.
+	srcOnly := netlink.Rule{
+		Priority: 150, Table: 200,
+		Src: &net.IPNet{IP: ip, Mask: net.CIDRMask(32, 32)},
+	}
+	if ruleMatches(srcOnly, ip, 200, 150, 0x51821) {
+		t.Error("a source rule must not satisfy an fwmark selector")
+	}
+	if ruleMatches(marked, ip, 200, 150, 0x99999) {
+		t.Error("a different mark must not match")
+	}
+}
+
+func TestRuleSelectorForm(t *testing.T) {
+	ip := net.ParseIP("172.16.0.90")
+
+	if r := NewManager(200, 150, 0).rule(ip); r.Src == nil || r.Mark == 0x51821 {
+		t.Errorf("wanted a source-matched rule, got Src=%v Mark=%v", r.Src, r.Mark)
+	}
+	if r := NewManager(200, 150, 0x51821).rule(ip); r.Mark != 0x51821 || r.Src != nil {
+		t.Errorf("wanted an fwmark-matched rule, got Src=%v Mark=%v", r.Src, r.Mark)
 	}
 }
 

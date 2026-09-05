@@ -52,11 +52,12 @@ CDS/LDS over gRPC and keeps the snapshot in sync with the config file.
   `ip rule` matching that mark, or the bypass silently does nothing. See the
   README's "Host routing prerequisite" and `docs/vpn-agent-integration.md`.
   `SO_MARK` is applied by Envoy to its own upstream sockets, so the privileges
-  belong on the **envoy** container, not on this control plane -- and on
-  Synology DSM `--cap-add=NET_ADMIN` is not enough, `--privileged` is also
-  needed. The mark defaults to 0 (off) because Envoy aborts the connection when
-  a socket option cannot be applied, so enabling it on a host that refuses
-  `SO_MARK` breaks every bypassed connection instead of degrading.
+  belong on the **envoy** container, not on this control plane -- and
+  `--cap-add=NET_ADMIN` alone is not enough, because the official image drops to
+  uid 101 and Docker cannot pass capabilities to an unprivileged process.
+  `--user 0:0` is also required. The mark defaults to 0 because Envoy aborts the
+  connection when a socket option cannot be applied, so getting this wrong
+  breaks every bypassed connection instead of degrading.
 - **Host header ports.** Envoy 1.16 matches virtual host domains against the raw
   `:authority`, and `strip_matching_host_port` does not exist in the v2 HCM API.
   Clients that send the default port (the Netflix LG TV app does, for its Pushy

@@ -81,12 +81,22 @@ bypassed connection rather than degrading.
 `CAP_NET_ADMIN` goes on the **envoy** container -- Envoy sets the option on its
 own sockets; the control plane only describes it.
 
-**Known not to work on Synology DSM.** Observed there: the container runs as
-uid 0, `CapEff` contains `CAP_NET_ADMIN` (bit 12), the network namespace is the
-host's, no user namespace is in use, and `--privileged` is set -- and
-`setsockopt(SOL_SOCKET, SO_MARK)` still returns `EPERM`, while the same mark
-works from the host shell. Cause unidentified. Use `-bypass-mark 0` and steer by
-source address.
+**The envoy process must run as root.** The official image's entrypoint drops
+to uid 101, and Docker cannot pass capabilities to an unprivileged process, so
+`--cap-add=NET_ADMIN` alone is not enough -- Envoy gets `EPERM` and, because it
+aborts the connection when a socket option cannot be applied, *every* bypassed
+connection fails. Add `--user 0:0` as well; [run.sh](./run.sh) does this
+automatically when a mark is configured. Confirm with:
+
+```
+$ docker top envoy
+UID    PID    CMD
+root   12344  sh /docker-entrypoint.sh --config-path /etc/envoy/envoy.yaml
+101    12414  envoy --config-path /etc/envoy/envoy.yaml      <-- needs to be root
+```
+
+Note `docker exec envoy id` and `/proc/1/status` both report the *entrypoint*,
+not Envoy, so neither will show you this.
 
 The narrower `ip rule` selectors are not available on older kernels either:
 `uidrange` needs 4.10+ (kernel and iproute2), `ipproto` needs 4.17+. On a 4.4

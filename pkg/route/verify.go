@@ -33,10 +33,13 @@ func parseDev(out string) string {
 
 // routeGet asks the kernel which interface it would use for probe, optionally
 // from a specific source address.
-func routeGet(probe string, from net.IP) (string, error) {
+func routeGet(probe string, from net.IP, mark int) (string, error) {
 	args := []string{"route", "get", probe}
 	if from != nil {
 		args = append(args, "from", from.String())
+	}
+	if mark != 0 {
+		args = append(args, "mark", fmt.Sprintf("%#x", mark))
 	}
 	out, err := exec.Command("ip", args...).CombinedOutput()
 	if err != nil {
@@ -49,16 +52,23 @@ func routeGet(probe string, from net.IP) (string, error) {
 	return dev, nil
 }
 
-// sourceRuleExists reports whether any ip rule selects on the bypass address,
+// selectorRuleExists reports whether any ip rule selects on the configured
+// selector -- the fwmark when one is set, otherwise the bypass address --
 // whoever installed it. Deliberately looser than ruleMatches: the operator may
 // manage the rule themselves with a different table or priority, and the
-// question here is only whether *something* steers this source.
-func sourceRuleExists(ip net.IP) (bool, error) {
+// question here is only whether *something* steers this traffic.
+func selectorRuleExists(ip net.IP, mark int) (bool, error) {
 	rules, err := netlink.RuleList(netlink.FAMILY_V4)
 	if err != nil {
 		return false, err
 	}
 	for _, r := range rules {
+		if mark != 0 {
+			if r.Mark == mark {
+				return true, nil
+			}
+			continue
+		}
 		if r.Src != nil && r.Src.IP.Equal(ip) {
 			return true, nil
 		}
@@ -78,30 +88,35 @@ func sourceRuleExists(ip net.IP) (bool, error) {
 //
 // Failures are warnings, never fatal: the proxy is still useful, and refusing
 // to start over host configuration would be worse than steering nothing.
-func Verify(ifName string, ip net.IP, probe string) {
+func Verify(ifName string, ip net.IP, probe string, mark int) {
 	if probe == "" {
 		probe = DefaultProbe
 	}
 
-	found, err := sourceRuleExists(ip)
+	selector := fmt.Sprintf("from %s", ip)
+	if mark != 0 {
+		selector = fmt.Sprintf("fwmark %#x", mark)
+	}
+
+	found, err := selectorRuleExists(ip, mark)
 	switch {
 	case err != nil:
 		logrus.Warnf("Bypass check: could not list ip rules: %s", err)
 	case !found:
-		logrus.Warnf("Bypass check: NO ip rule selects on %s. Bypassed traffic will follow the "+
-			"host default route. Fix with 'ip rule add from %s lookup <table> priority 150', "+
-			"or run with -ip-rule to manage it here", ip, ip)
+		logrus.Warnf("Bypass check: NO ip rule selects on '%s'. Bypassed traffic will follow the "+
+			"host default route. Fix with 'ip rule add %s lookup <table> priority 150', "+
+			"or run with -ip-rule to manage it here", selector, selector)
 	}
 
-	bypassDev, err := routeGet(probe, ip)
+	bypassDev, err := routeGet(probe, ip, mark)
 	if err != nil {
 		// iproute2 missing is not an error worth shouting about; the structural
 		// check above already ran.
-		logrus.Debugf("Bypass check: route lookup from %s unavailable: %s", ip, err)
+		logrus.Debugf("Bypass check: route lookup for '%s' unavailable: %s", selector, err)
 		return
 	}
 
-	defaultDev, err := routeGet(probe, nil)
+	defaultDev, err := routeGet(probe, nil, 0)
 	if err != nil {
 		logrus.Debugf("Bypass check: default route lookup unavailable: %s", err)
 		defaultDev = ""
@@ -109,14 +124,14 @@ func Verify(ifName string, ip net.IP, probe string) {
 
 	switch {
 	case bypassDev != ifName:
-		logrus.Warnf("Bypass check: traffic from %s to %s egresses %q, not the bypass interface %q. "+
+		logrus.Warnf("Bypass check: traffic matching '%s' to %s egresses %q, not the bypass interface %q. "+
 			"The bypass is NOT working; check 'ip rule show' and the table it points at",
-			ip, probe, bypassDev, ifName)
+			selector, probe, bypassDev, ifName)
 	case defaultDev == ifName:
-		logrus.Infof("Bypass check: traffic from %s egresses %s as expected, but so does everything "+
-			"else -- there is no separate default path, so the split is currently a no-op "+
-			"(is the VPN up?)", ip, ifName)
+		logrus.Infof("Bypass check: traffic matching '%s' egresses %s as expected, but so does "+
+			"everything else -- there is no separate default path, so the split is currently a "+
+			"no-op (is the VPN up?)", selector, ifName)
 	default:
-		logrus.Infof("Bypass check: OK. From %s -> %s; everything else -> %s", ip, bypassDev, defaultDev)
+		logrus.Infof("Bypass check: OK. %s -> %s; everything else -> %s", selector, bypassDev, defaultDev)
 	}
 }

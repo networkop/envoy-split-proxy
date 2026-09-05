@@ -32,6 +32,11 @@ var defaultNet = net.IPNet{IP: net.IPv4zero, Mask: net.CIDRMask(0, 32)}
 type Manager struct {
 	table    int
 	priority int
+	// mark selects the rule form. Non-zero installs an fwmark rule matching
+	// what Envoy sets via SO_MARK, which only sockets that deliberately set it
+	// can satisfy. Zero falls back to matching the bound source address, which
+	// works on any kernel but also matches anything else binding that address.
+	mark int
 
 	// applied is the address the installed rule currently matches, so a change
 	// to the interface's address replaces the rule rather than leaving a stale
@@ -45,8 +50,8 @@ type Manager struct {
 // so LAN destinations still resolve from the main table and never reach this
 // one, and above the VPN's catch-all so bypassed traffic beats the tunnel. 150
 // works with the common 100/1000 layout.
-func NewManager(table, priority int) *Manager {
-	return &Manager{table: table, priority: priority}
+func NewManager(table, priority, mark int) *Manager {
+	return &Manager{table: table, priority: priority, mark: mark}
 }
 
 // pickDefault returns the gateway of the default route leaving via linkIndex.
@@ -68,10 +73,13 @@ func pickDefault(routes []netlink.Route, linkIndex int) (net.IP, bool) {
 	return nil, false
 }
 
-// ruleMatches reports whether r is the rule this Manager installs for ip.
-func ruleMatches(r netlink.Rule, ip net.IP, table, priority int) bool {
+// ruleMatches reports whether r is the rule this Manager installs.
+func ruleMatches(r netlink.Rule, ip net.IP, table, priority, mark int) bool {
 	if r.Priority != priority || r.Table != table {
 		return false
+	}
+	if mark != 0 {
+		return r.Mark == mark
 	}
 	return r.Src != nil && r.Src.IP.Equal(ip)
 }
@@ -80,8 +88,20 @@ func (m *Manager) rule(ip net.IP) *netlink.Rule {
 	r := netlink.NewRule()
 	r.Priority = m.priority
 	r.Table = m.table
+	if m.mark != 0 {
+		r.Mark = m.mark
+		return r
+	}
 	r.Src = &net.IPNet{IP: ip, Mask: net.CIDRMask(32, 32)}
 	return r
+}
+
+// selector describes the installed rule for logs.
+func (m *Manager) selector(ip net.IP) string {
+	if m.mark != 0 {
+		return fmt.Sprintf("fwmark %#x", m.mark)
+	}
+	return fmt.Sprintf("from %s", ip)
 }
 
 // Ensure idempotently installs the default route and the rule for the given
@@ -121,7 +141,9 @@ func (m *Manager) Ensure(ifName string, ip net.IP) error {
 	}
 
 	// Drop a rule left over from a previous address before adding the new one.
-	if m.applied != nil && !m.applied.Equal(ip) {
+	// Only relevant for source-matched rules; an fwmark rule does not depend
+	// on the address at all.
+	if m.mark == 0 && m.applied != nil && !m.applied.Equal(ip) {
 		logrus.Infof("Bypass address changed from %s to %s, replacing ip rule", m.applied, ip)
 		m.removeRule(m.applied)
 	}
@@ -132,10 +154,10 @@ func (m *Manager) Ensure(ifName string, ip net.IP) error {
 	}
 	if !present {
 		if err := netlink.RuleAdd(m.rule(ip)); err != nil {
-			return fmt.Errorf("installing ip rule from %s: %w", ip, err)
+			return fmt.Errorf("installing ip rule %s: %w", m.selector(ip), err)
 		}
-		logrus.Infof("Installed ip rule: from %s lookup %d priority %d (via %s dev %s)",
-			ip, m.table, m.priority, gw, ifName)
+		logrus.Infof("Installed ip rule: %s lookup %d priority %d (via %s dev %s)",
+			m.selector(ip), m.table, m.priority, gw, ifName)
 	}
 	m.applied = ip
 
@@ -148,7 +170,7 @@ func (m *Manager) ruleInstalled(ip net.IP) (bool, error) {
 		return false, fmt.Errorf("listing ip rules: %w", err)
 	}
 	for _, r := range rules {
-		if ruleMatches(r, ip, m.table, m.priority) {
+		if ruleMatches(r, ip, m.table, m.priority, m.mark) {
 			return true, nil
 		}
 	}
@@ -157,10 +179,10 @@ func (m *Manager) ruleInstalled(ip net.IP) (bool, error) {
 
 func (m *Manager) removeRule(ip net.IP) {
 	if err := netlink.RuleDel(m.rule(ip)); err != nil {
-		logrus.Infof("Failed to remove ip rule from %s: %s", ip, err)
+		logrus.Infof("Failed to remove ip rule %s: %s", m.selector(ip), err)
 		return
 	}
-	logrus.Infof("Removed ip rule: from %s lookup %d priority %d", ip, m.table, m.priority)
+	logrus.Infof("Removed ip rule: %s lookup %d priority %d", m.selector(ip), m.table, m.priority)
 }
 
 // Remove deletes the rule and the table's default route. Errors are logged
