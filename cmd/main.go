@@ -31,7 +31,7 @@ var (
 	httpIn     = flag.Int("http-in", 80, "destination port redirected to the http listener with -iptables")
 	manageRule = flag.Bool("ip-rule", false, "manage the policy route and ip rule that steer bypassed traffic out the bypass interface. Requires CAP_NET_ADMIN")
 	ruleTable  = flag.Int("rule-table", 200, "routing table holding the bypass default route, used with -ip-rule")
-	rulePrio   = flag.Int("rule-priority", 150, "ip rule priority, used with -ip-rule. Must sit below any 'lookup main suppress_prefixlength 0' rule and above the VPN catch-all")
+	rulePrio   = flag.Int("rule-priority", 151, "ip rule priority, used with -ip-rule. Must sit below any 'lookup main suppress_prefixlength 0' rule and above the VPN catch-all, and must not collide with a rule another agent manages")
 	verify     = flag.Bool("verify", true, "at startup, check the host actually steers bypassed traffic out the bypass interface, and warn if not")
 	probeAddr  = flag.String("verify-probe", route.DefaultProbe, "destination used for the -verify route lookups. No packets are sent")
 	recheck    = flag.Duration("recheck", time.Minute, "how often to re-assert the -ip-rule routing, 0 to only do it at startup")

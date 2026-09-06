@@ -48,8 +48,14 @@ type Manager struct {
 //
 // The priority has to sit below any "lookup main suppress_prefixlength 0" rule
 // so LAN destinations still resolve from the main table and never reach this
-// one, and above the VPN's catch-all so bypassed traffic beats the tunnel. 150
-// works with the common 100/1000 layout.
+// one, and above the VPN's catch-all so bypassed traffic beats the tunnel.
+//
+// It must also not collide with a rule another agent manages. smart-vpn-client
+// owns priority 150 and deletes *any* rule it finds there -- along with the
+// default route in whatever table that rule pointed at -- whenever it tears
+// down or reconnects, with no check that the rule is its own. Sharing the
+// priority means the bypass silently disappears on the next VPN reconnect,
+// which is why the default here is 151 rather than 150.
 func NewManager(table, priority, mark int) *Manager {
 	return &Manager{table: table, priority: priority, mark: mark}
 }

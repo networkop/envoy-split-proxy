@@ -97,6 +97,13 @@ Things that look like evidence and are not:
   sample may have been captured during one of those gaps — sample repeatedly.
 - **Envoy's HTTP listener re-resolves the Host header**, so the upstream address
   can legitimately differ from the one the client dialled. Not a fault.
+- **Another agent may delete your ip rule.** `smart-vpn-client` owns priority
+  150 and, on every teardown or reconnect, deletes any rule it finds there plus
+  the default route in the table that rule pointed at -- without checking the
+  rule is its own. A bypass installed at 150 therefore survives until the next
+  VPN reconnect and then vanishes, which looks exactly like it was never
+  installed. `-rule-priority` defaults to 151 for this reason. Symptom: the app
+  logs `Installed ip rule` at startup but `ip rule show` has nothing.
 - **The host may already have its own source rule, above yours.** Synology DSM
   registers named tables in `/etc/iproute2/rt_tables` and installs
   `3: from <interface address> lookup eth0-table`, whose default is via the LAN

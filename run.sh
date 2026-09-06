@@ -27,6 +27,11 @@ ENVOY_IMG=${ENVOY_IMG:-envoyproxy/envoy:v1.16.2}
 #                 script catches that.
 BYPASS_MARK=${BYPASS_MARK:-0}
 
+# ip rule priority for the bypass. Must not collide with a rule another agent
+# manages: smart-vpn-client owns 150 and deletes anything it finds there on
+# every reconnect, taking the bypass with it.
+RULE_PRIORITY=${RULE_PRIORITY:-151}
+
 if [ "$BYPASS_MARK" = "0" ]; then
   ENVOY_PRIV=""
 else
@@ -47,7 +52,7 @@ docker rm -f envoy
 docker run -d --name app --restart always --net host --cap-add=NET_ADMIN \
 -v $(pwd)/split.yaml:/split.yaml \
 $IMG \
--conf /split.yaml -bypass-mark $BYPASS_MARK -iptables -ip-rule
+-conf /split.yaml -bypass-mark $BYPASS_MARK -iptables -ip-rule -rule-priority $RULE_PRIORITY
 
 docker run -d --name envoy --restart always --net host $ENVOY_PRIV \
 -v $(pwd)/envoy.yaml:/etc/envoy/envoy.yaml \

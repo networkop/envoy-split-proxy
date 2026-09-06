@@ -47,6 +47,14 @@ requirement below is not optional.
    and never reach the bypass table, and *above* the catch-all so it beats the
    tunnel.
 
+   **Delete only rules you own.** `delBypassSrcRule` currently matches on
+   priority alone, so it removes any rule another component installed at 150 --
+   and the default route in the table that rule pointed at -- on every teardown
+   or reconnect. That silently breaks `envoy-split-proxy`, which installs its
+   own rule and now defaults to 151 to avoid the collision. Match on the
+   configured mark and table as well, and scope `-cleanup` to rules whose table
+   is the configured bypass table.
+
 2. **New table.** Populate it with a single default route via the native
    gateway:
 
