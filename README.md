@@ -74,6 +74,13 @@ ip rule add fwmark 0x51821 lookup 200 priority 150
 That is narrower -- only Envoy's bypass sockets carry the mark, whereas any
 process binding that source address matches the first form.
 
+With a mark configured Envoy deliberately does **not** bind the interface
+address, so the route lookup carries no source and the mark is the only thing
+selecting a rule. This matters on hosts that already have a source rule of their
+own: Synology DSM installs `from <interface address> lookup eth0-table` at
+priority 3, ahead of anything else, which would otherwise decide the route and
+silently negate the mark. Check for one with `ip rule show`.
+
 It is off by default because Envoy **aborts the connection** when a socket
 option cannot be applied, so on a host that refuses `SO_MARK` it breaks every
 bypassed connection rather than degrading.

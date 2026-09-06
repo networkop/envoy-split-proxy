@@ -108,7 +108,15 @@ func Verify(ifName string, ip net.IP, probe string, mark int) {
 			"or run with -ip-rule to manage it here", selector, selector)
 	}
 
-	bypassDev, err := routeGet(probe, ip, mark)
+	// In mark mode the lookup must NOT carry a source address. Passing one
+	// would match any higher-priority source rule the host has (DSM installs
+	// one at priority 3) and report a healthy bypass even when the fwmark rule
+	// is missing or wrong.
+	from := ip
+	if mark != 0 {
+		from = nil
+	}
+	bypassDev, err := routeGet(probe, from, mark)
 	if err != nil {
 		// iproute2 missing is not an error worth shouting about; the structural
 		// check above already ran.

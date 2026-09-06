@@ -67,9 +67,6 @@ func TestWithDefaultPort(t *testing.T) {
 
 func TestBypassBindConfig(t *testing.T) {
 	withMark := newBypassBindConfig("172.16.0.90", 0x51821)
-	if got := withMark.GetSourceAddress().GetAddress(); got != "172.16.0.90" {
-		t.Errorf("wanted source 172.16.0.90, got: %v", got)
-	}
 	opts := withMark.GetSocketOptions()
 	if len(opts) != 1 {
 		t.Fatalf("wanted 1 socket option, got: %d", len(opts))
@@ -100,5 +97,23 @@ func TestBuildClusterOnlyMarksBypass(t *testing.T) {
 		if bind != nil {
 			t.Errorf("%s: default cluster must not bind or mark its sockets", c.GetName())
 		}
+	}
+}
+
+func TestBypassBindUnboundWhenMarked(t *testing.T) {
+	// A host may already have a higher-priority source rule for the interface
+	// address, so with a mark configured the source must be left unspecified or
+	// that rule decides the route instead of the mark.
+	marked := newBypassBindConfig("172.16.0.90", 0x51821)
+	if got := marked.GetSourceAddress().GetAddress(); got != "0.0.0.0" {
+		t.Errorf("wanted an unbound source with a mark set, got: %v", got)
+	}
+	if len(marked.GetSocketOptions()) != 1 {
+		t.Error("wanted the fwmark socket option to still be set")
+	}
+
+	unmarked := newBypassBindConfig("172.16.0.90", 0)
+	if got := unmarked.GetSourceAddress().GetAddress(); got != "172.16.0.90" {
+		t.Errorf("without a mark the source address is the selector, got: %v", got)
 	}
 }

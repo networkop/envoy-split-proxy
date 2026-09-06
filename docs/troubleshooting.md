@@ -97,6 +97,13 @@ Things that look like evidence and are not:
   sample may have been captured during one of those gaps — sample repeatedly.
 - **Envoy's HTTP listener re-resolves the Host header**, so the upstream address
   can legitimately differ from the one the client dialled. Not a fault.
+- **The host may already have its own source rule, above yours.** Synology DSM
+  registers named tables in `/etc/iproute2/rt_tables` and installs
+  `3: from <interface address> lookup eth0-table`, whose default is via the LAN
+  gateway. Anything binding that address therefore leaves natively regardless of
+  what you install at priority 150, and `ip route get <dst> from <address>` will
+  report a healthy bypass even when your own rule is missing. Check the whole of
+  `ip rule show`, not just your own priority.
 - **`iptables` and `iptables-legacy` are different rulesets.** On Synology DSM
   the host's `iptables` is nft-backed and cannot open the `nat` table at all,
   failing with `No chain/target/match by that name` -- which reads like missing

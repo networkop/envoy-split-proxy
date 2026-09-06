@@ -129,9 +129,25 @@ func buildCluster(ip string, mark int) []types.Resource {
 // SO_MARK must be set before connect(), hence STATE_PREBIND, and requires
 // CAP_NET_ADMIN in the Envoy container.
 func newBypassBindConfig(ip string, mark int) *core.BindConfig {
+	source := ip
+	if mark != 0 {
+		// Bind to INADDR_ANY so the route lookup carries no source address and
+		// the fwmark is the only thing selecting a rule.
+		//
+		// Binding the interface address as well would be actively harmful: a
+		// host may already have a higher-priority source rule for it -- Synology
+		// DSM installs "from <addr> lookup eth0-table" at priority 3 -- which
+		// would match first and decide the route regardless of the mark,
+		// silently undoing the precision the mark exists to provide. The source
+		// still ends up as the interface address, chosen by the route the mark
+		// selects. BindConfig requires a source_address, hence 0.0.0.0 rather
+		// than omitting it.
+		source = "0.0.0.0"
+	}
+
 	bind := &core.BindConfig{
 		SourceAddress: &core.SocketAddress{
-			Address: ip,
+			Address: source,
 			PortSpecifier: &core.SocketAddress_PortValue{
 				PortValue: uint32(0),
 			},
@@ -143,7 +159,7 @@ func newBypassBindConfig(ip string, mark int) *core.BindConfig {
 		return bind
 	}
 
-	logrus.Debugf("Marking bypass upstream sockets with fwmark %#x", mark)
+	logrus.Debugf("Marking bypass upstream sockets with fwmark %#x, source unbound", mark)
 	bind.SocketOptions = []*core.SocketOption{
 		{
 			Description: "bypass fwmark",
