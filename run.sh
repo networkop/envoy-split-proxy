@@ -15,10 +15,11 @@ ENVOY_IMG=${ENVOY_IMG:-envoyproxy/envoy:v1.16.2}
 #   0x51821 etc.  Match on an fwmark Envoy sets via SO_MARK. Only sockets that
 #                 deliberately set the mark qualify, so this is the precise
 #                 option. It needs CAP_NET_ADMIN *and* the envoy process itself
-#                 running as root -- the official image drops to uid 101 in its
-#                 entrypoint (see 'docker top envoy'), and Docker cannot pass
-#                 capabilities to an unprivileged process, so --user 0:0 is
-#                 added below whenever a mark is configured.
+#                 running as root. The official image's entrypoint drops to uid
+#                 101 via su-exec unless ENVOY_UID=0 is set, and Docker cannot
+#                 pass capabilities to an unprivileged process -- so --user 0:0
+#                 alone does nothing. ENVOY_UID=0 is set below whenever a mark
+#                 is configured. Confirm with 'docker top envoy'.
 #
 #                 Envoy aborts the connection when a socket option cannot be
 #                 applied, so a mark that fails to apply breaks every bypassed
@@ -29,7 +30,7 @@ BYPASS_MARK=${BYPASS_MARK:-0}
 if [ "$BYPASS_MARK" = "0" ]; then
   ENVOY_PRIV=""
 else
-  ENVOY_PRIV="--user 0:0 --cap-add=NET_ADMIN"
+  ENVOY_PRIV="-e ENVOY_UID=0 --cap-add=NET_ADMIN"
 fi
 
 docker pull "$IMG"

@@ -53,9 +53,10 @@ CDS/LDS over gRPC and keeps the snapshot in sync with the config file.
   README's "Host routing prerequisite" and `docs/vpn-agent-integration.md`.
   `SO_MARK` is applied by Envoy to its own upstream sockets, so the privileges
   belong on the **envoy** container, not on this control plane -- and
-  `--cap-add=NET_ADMIN` alone is not enough, because the official image drops to
-  uid 101 and Docker cannot pass capabilities to an unprivileged process.
-  `--user 0:0` is also required. The mark defaults to 0 because Envoy aborts the
+  `--cap-add=NET_ADMIN` alone is not enough, because the image's entrypoint runs
+  `su-exec envoy` unless `ENVOY_UID=0` is set and Docker cannot pass
+  capabilities to an unprivileged process. `-e ENVOY_UID=0` is required;
+  `--user 0:0` does not help. The mark defaults to 0 because Envoy aborts the
   connection when a socket option cannot be applied, so getting this wrong
   breaks every bypassed connection instead of degrading.
 - **Host header ports.** Envoy 1.16 matches virtual host domains against the raw

@@ -81,11 +81,14 @@ bypassed connection rather than degrading.
 `CAP_NET_ADMIN` goes on the **envoy** container -- Envoy sets the option on its
 own sockets; the control plane only describes it.
 
-**The envoy process must run as root.** The official image's entrypoint drops
-to uid 101, and Docker cannot pass capabilities to an unprivileged process, so
-`--cap-add=NET_ADMIN` alone is not enough -- Envoy gets `EPERM` and, because it
-aborts the connection when a socket option cannot be applied, *every* bypassed
-connection fails. Add `--user 0:0` as well; [run.sh](./run.sh) does this
+**The envoy process must run as root.** The official image's entrypoint runs
+`su-exec envoy` unless `ENVOY_UID=0` is set, and Docker cannot pass capabilities
+to an unprivileged process -- so `--cap-add=NET_ADMIN` alone is not enough, and
+neither is `--user 0:0`, which only gives the entrypoint something to drop from.
+Envoy gets `EPERM` and, because it aborts the connection when a socket option
+cannot be applied, *every* bypassed connection fails.
+
+Set `-e ENVOY_UID=0` on the envoy container; [run.sh](./run.sh) does this
 automatically when a mark is configured. Confirm with:
 
 ```

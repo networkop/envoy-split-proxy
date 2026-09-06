@@ -117,7 +117,7 @@ address is the only option:
 | Selector | Needs | Notes |
 |---|---|---|
 | `from <ip>` | any | Matches any socket that *binds* that address. Unbound sockets carry no source into the route lookup, so ordinary box traffic is unaffected. |
-| `fwmark` | any kernel, plus `CAP_NET_ADMIN` **and the envoy process running as root** | `-bypass-mark`. The official image's entrypoint drops to uid 101, and Docker cannot pass capabilities to an unprivileged process, so `--cap-add=NET_ADMIN` alone yields `EPERM`. Add `--user 0:0`. Envoy **aborts the connection** when the option fails, so getting this wrong breaks every bypassed connection rather than degrading. `docker top envoy` shows the real uid; `docker exec envoy id` and `/proc/1/status` both report the entrypoint instead. |
+| `fwmark` | any kernel, plus `CAP_NET_ADMIN` **and the envoy process running as root** | `-bypass-mark`. The image's entrypoint runs `su-exec envoy` unless `ENVOY_UID=0`, and Docker cannot pass capabilities to an unprivileged process, so `--cap-add=NET_ADMIN` yields `EPERM` and `--user 0:0` does not help either. Set `-e ENVOY_UID=0`. Envoy **aborts the connection** when the option fails, so getting this wrong breaks every bypassed connection rather than degrading. `docker top envoy` shows the real uid; `docker exec envoy id` and `/proc/1/status` both report the entrypoint instead. |
 | `uidrange` | kernel 4.10+, iproute2 4.10+ | The only true guarantee: a process cannot spoof its UID. Older iproute2 fails with `argument "uidrange" is wrong`. |
 | `ipproto` | kernel 4.17+ | Narrows to TCP. |
 
