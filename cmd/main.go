@@ -5,7 +5,9 @@ import (
 	"fmt"
 	"os"
 	"os/signal"
+	"sync"
 	"syscall"
+	"time"
 
 	"github.com/networkop/envoy-split-proxy/pkg/config"
 	"github.com/networkop/envoy-split-proxy/pkg/envoy"
@@ -32,6 +34,7 @@ var (
 	rulePrio   = flag.Int("rule-priority", 150, "ip rule priority, used with -ip-rule. Must sit below any 'lookup main suppress_prefixlength 0' rule and above the VPN catch-all")
 	verify     = flag.Bool("verify", true, "at startup, check the host actually steers bypassed traffic out the bypass interface, and warn if not")
 	probeAddr  = flag.String("verify-probe", route.DefaultProbe, "destination used for the -verify route lookups. No packets are sent")
+	recheck    = flag.Duration("recheck", time.Minute, "how often to re-assert the -ip-rule routing, 0 to only do it at startup")
 )
 
 // Run kicks off the main control loops
@@ -98,6 +101,7 @@ func Run() error {
 
 	go func() {
 		for d := range dataChan {
+			setLastState(d)
 			if router != nil {
 				if err := router.Ensure(d.Interface, d.IP); err != nil {
 					// Non-fatal: the proxy still works, it just steers nothing.
@@ -113,9 +117,48 @@ func Run() error {
 		}
 	}()
 
+	// Re-assert periodically. The rules are installed once at startup, but the
+	// host can lose them afterwards: another agent flushing rules, a VPN
+	// reconnect, or a boot where this ran before the default route existed.
+	// Ensure is idempotent and silent when everything is already in place, so
+	// this is quiet unless it actually fixes something.
+	if router != nil && *recheck > 0 {
+		go func() {
+			for range time.Tick(*recheck) {
+				last := lastState()
+				if last == nil {
+					continue
+				}
+				if err := router.Ensure(last.Interface, last.IP); err != nil {
+					logrus.Warnf("Bypass routing re-check failed, bypassed traffic may be following "+
+						"the host default route: %s", err)
+				}
+			}
+		}()
+	}
+
 	sig := make(chan os.Signal, 1)
 	signal.Notify(sig, syscall.SIGINT, syscall.SIGTERM)
 	logrus.Infof("Received signal %s, shutting down", <-sig)
 
 	return nil
+}
+
+// The re-check goroutine needs the latest interface and address without racing
+// the config watcher, which owns them.
+var (
+	stateMu sync.Mutex
+	state   *config.Data
+)
+
+func setLastState(d *config.Data) {
+	stateMu.Lock()
+	defer stateMu.Unlock()
+	state = d
+}
+
+func lastState() *config.Data {
+	stateMu.Lock()
+	defer stateMu.Unlock()
+	return state
 }

@@ -60,6 +60,11 @@ table's default route via the bypass interface, so it follows DHCP; the rule is
 reinstalled if the interface's address changes. Requires `CAP_NET_ADMIN`.
 `-rule-table` and `-rule-priority` override the defaults.
 
+It re-asserts every `-recheck` interval (default 1m, 0 disables), so the bypass
+recovers on its own if something flushes the rules -- another agent, a VPN
+reconnect, or a boot where this started before the default route existed. The
+re-check is silent unless it actually had to fix something.
+
 Priority 150 is load-bearing: below any `lookup main suppress_prefixlength 0`
 rule so LAN destinations still resolve from the main table, and above a VPN's
 catch-all so bypassed traffic beats the tunnel.
