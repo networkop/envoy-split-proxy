@@ -17,6 +17,10 @@ ADMIN_PORT=${ADMIN_PORT:-19000}
 SPLIT=${SPLIT:-./split.yaml}
 APP_CONTAINER=${APP_CONTAINER:-app}
 
+# Must match the -bypass-mark the app runs with: 0 means the host rule selects
+# on the bound source address, non-zero means it selects on that fwmark.
+BYPASS_MARK=${BYPASS_MARK:-0}
+
 # Must be listed in split.yaml (it is, under "## Testing") and must return the
 # caller's IP as plain text over HTTP.
 BYPASS_HOST=${BYPASS_HOST:-ifconfig.me}
@@ -47,20 +51,28 @@ info "bypass interface $IFACE, address $BYPASS_IP"
 
 echo "== host routing =="
 
-if ip rule show 2>/dev/null | grep -q "from $BYPASS_IP"; then
-  ok "ip rule selects on $BYPASS_IP"
+if [ "$BYPASS_MARK" = "0" ]; then
+  SELECTOR="from $BYPASS_IP"
+  GET_ARGS="from $BYPASS_IP"
 else
-  bad "no ip rule selects on $BYPASS_IP -- bypassed traffic follows the default route"
+  SELECTOR="fwmark $BYPASS_MARK"
+  GET_ARGS="mark $BYPASS_MARK"
+fi
+
+if ip rule show 2>/dev/null | grep -qi "$SELECTOR"; then
+  ok "ip rule selects on '$SELECTOR'"
+else
+  bad "no ip rule selects on '$SELECTOR' -- bypassed traffic follows the default route"
 fi
 
 # No packets are sent; this only asks which route the kernel would choose.
-bypass_dev=$(ip route get 1.1.1.1 from "$BYPASS_IP" 2>/dev/null | sed -n 's/.* dev \([^ ]*\).*/\1/p' | head -1)
+bypass_dev=$(ip route get 1.1.1.1 $GET_ARGS 2>/dev/null | sed -n 's/.* dev \([^ ]*\).*/\1/p' | head -1)
 default_dev=$(ip route get 1.1.1.1 2>/dev/null | sed -n 's/.* dev \([^ ]*\).*/\1/p' | head -1)
 
 if [ "$bypass_dev" = "$IFACE" ]; then
-  ok "traffic from $BYPASS_IP routes via $IFACE"
+  ok "traffic matching '$SELECTOR' routes via $IFACE"
 else
-  bad "traffic from $BYPASS_IP routes via '${bypass_dev:-?}', expected $IFACE"
+  bad "traffic matching '$SELECTOR' routes via '${bypass_dev:-?}', expected $IFACE"
 fi
 
 if [ -z "$default_dev" ]; then
@@ -128,11 +140,18 @@ echo "== egress addresses =="
 
 # Reference addresses, taken without going through Envoy. --interface binds the
 # source address the way Envoy's bypass clusters do.
+# curl can bind a source address but cannot set SO_MARK, so with a mark
+# configured this reference only means anything if the source is also a valid
+# selector. Note it rather than reporting a false failure.
 direct=$(curl -s --max-time 10 --interface "$BYPASS_IP" "http://$BYPASS_HOST" | tr -d '[:space:]')
 vpn=$(curl -s --max-time 10 "http://$BYPASS_HOST" | tr -d '[:space:]')
 
 if [ -z "$direct" ] || [ -z "$vpn" ]; then
   bad "could not reach $BYPASS_HOST to establish reference addresses"
+elif [ "$direct" = "$vpn" ] && [ "$BYPASS_MARK" != "0" ]; then
+  info "source-bound reference exits as $direct, same as the default path -- expected with"
+  info "an fwmark selector, since curl cannot set a mark. The through-envoy checks below"
+  info "are the ones that matter."
 elif [ "$direct" = "$vpn" ]; then
   info "both paths exit as $direct -- nothing to distinguish (VPN down?)"
 else
@@ -155,7 +174,15 @@ fi
 got_bypass=$(curl -s --max-time 10 -H "Host: $BYPASS_HOST" "http://127.0.0.1:$HTTP_PORT/" | tr -d '[:space:]')
 got_default=$(curl -s --max-time 10 -H "Host: $DEFAULT_HOST" "http://127.0.0.1:$HTTP_PORT/" | tr -d '[:space:]')
 
-if [ -n "$direct" ] && [ "$got_bypass" = "$direct" ]; then
+if [ "$BYPASS_MARK" != "0" ] && [ "$direct" = "$vpn" ]; then
+  # No usable source-bound reference; fall back to asserting the two paths
+  # through Envoy differ, which is the property that actually matters.
+  if [ -n "$got_bypass" ] && [ "$got_bypass" != "$got_default" ]; then
+    ok "$BYPASS_HOST via Envoy exits as $got_bypass, distinct from the default path"
+  else
+    bad "$BYPASS_HOST and $DEFAULT_HOST both exit as '${got_bypass:-?}' -- the split is not working"
+  fi
+elif [ -n "$direct" ] && [ "$got_bypass" = "$direct" ]; then
   ok "$BYPASS_HOST via Envoy exits as $got_bypass (bypassed)"
 else
   bad "$BYPASS_HOST via Envoy exits as '${got_bypass:-?}', expected $direct -- check it is listed in $SPLIT"
