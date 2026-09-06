@@ -127,6 +127,69 @@ it verifies the policy without generating any traffic.
 
 ---
 
+## Task 2: delete only the rules you own
+
+Independent of Task 1, and needed even when the bypass feature is switched off.
+
+### The bug
+
+`delBypassSrcRule` matches on priority alone:
+
+```go
+for i, r := range rules {
+    if r.Priority != bypassRulePrio { continue }   // no ownership check
+    table := r.Table
+    netlink.RuleDel(&rules[i])
+    t.delBypassTableRoute(table)                   // ...and the other table's route
+}
+```
+
+So on every teardown or reconnect it removes any rule another component installed
+at that priority, plus the default route in whatever table that rule pointed at.
+There is no `Enabled()` guard either, so it happens with `-bypass-mark` unset.
+
+Observed on a live box: `envoy-split-proxy` installed
+`151: from all fwmark 0x51821 lookup 200` at boot, this agent started afterwards
+and removed both the rule and table 200's default route, and the split proxy went
+inert with nothing in either log to say why. It looks identical to the rule never
+having been installed.
+
+### The tension to preserve
+
+The existing comment explains the priority-only match: `-cleanup` is documented
+as needing no configuration, so it runs without the bypass flags, and matching
+strictly on the configured mark and table would orphan a rule left by an earlier,
+fully-configured run. That reasoning is sound and the fix must keep it working,
+not discard it.
+
+### Suggested resolution
+
+Match on **priority and table**, where the table is the agent's own bypass table
+(`-bypass-table`, default 51821) regardless of whether a mark is configured. That
+still cleans up rules from an earlier configured run, because the table default
+does not change with the mark, while never matching a rule pointing at somebody
+else's table.
+
+Do not widen `delBypassTableRoute` to whatever table the found rule names -- only
+flush the agent's own.
+
+### Tests
+
+Extend `pkg/wg/nl_rules_test.go`:
+
+* a foreign rule at `bypassRulePrio` pointing at a different table survives both
+  `delRules` and the `-cleanup` path, and its table's routes are untouched
+* the agent's own rule is still removed by both
+* the existing idempotent-reconnect case still passes
+
+### Out of scope
+
+* Changing `bypassRulePrio` itself -- 150 is fine for the agent's own rule;
+  `envoy-split-proxy` has moved to 151
+* Anything in `envoy-split-proxy`
+
+---
+
 ## Notes for whoever runs this
 
 `SO_MARK` is set by Envoy on its own upstream sockets, so `CAP_NET_ADMIN` goes
